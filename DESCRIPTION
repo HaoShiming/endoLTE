@@ -1,0 +1,35 @@
+Package: endoLTE
+Type: Package
+Title: Endogenous and Heterogeneous Treatment Effect Estimation for Long Range Dependent Panel Data in Untreated Units Absent Time-seires Natural Experiments
+Version: 1.0.0
+Date: 2026-02-11
+Authors@R: 
+    person(given = "Hao",
+           family = "Shiming",
+           role = c("aut", "cre"),
+           email = "haoshiming@ynu.edu.cn")
+Description: An R package for estimating time-varying treatments effects with endogeneity and long-run dependence in panel data. Implements robust methods for heterogeneous treatment effect estimation with staggered adoption designs.
+License: GPL-3
+Encoding: UTF-8
+LazyData: true
+Depends:
+    R (>= 3.5.0)
+Imports:
+    stats,
+    graphics,
+    grDevices,
+    utils,
+    MASS,
+    plm,
+    fGarch
+Suggests:
+    testthat,
+    knitr,
+    rmarkdown,
+    ggplot2,
+    parallel,
+    foreach,
+    doParallel
+RoxygenNote: 7.3.1
+URL: https://github.com/HaoShiming/endoLTE
+BugReports: https://github.com/HaoShiming/endoLTE/issues
