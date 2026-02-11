@@ -13,6 +13,7 @@ The current beta version can be installed from Github by:
 library(devtools)
 devtools::install_github("HaoShiming/endoLTE", INSTALL_opts=c("--no-multiarch"))
 library(endoLTE)
+```r
 
 Examples:
 ```r
@@ -124,3 +125,4 @@ saveRDS(result1, file = "endoLTE_results.rds")
 # Load results
 loaded_results <- readRDS("endoLTE_results.rds")
 summary(loaded_results)
+```r
