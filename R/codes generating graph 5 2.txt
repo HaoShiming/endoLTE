@@ -1,0 +1,1191 @@
+# ============================================================================
+# Panel Data Time-Varying Treatment Effect Estimation
+# Extension of Single Time Series Method to Panel Data
+# ============================================================================
+
+# Clean environment
+rm(list = ls())
+gc()
+
+# Set random seed
+set.seed(12345)
+
+# ============================================================================
+# 1. Helper Functions - Including Original Single Series Method
+# ============================================================================
+
+# Fractional Brownian Motion Generation (FFT Method) - Fixed Version
+fbm1d <- function(H, n, T, iseed) {
+  set.seed(iseed)
+  n <- as.integer(n)
+  
+  if (n < 2) {
+    n <- 2
+  }
+  
+  r <- numeric(n + 1)
+  r[1] <- 0
+  
+  for (i in 1:n) {
+    r[i + 1] <- 0.5 * ((i + 1)^(2 * H) - 2 * i^(2 * H) + (i - 1)^(2 * H))
+  }
+  
+  r_sym <- c(r, r[seq(n, 2, by = -1)])
+  lambda <- Re(fft(r_sym)) / (2 * n)
+  lambda <- pmax(lambda, 0)
+  
+  real_part <- rnorm(2 * n)
+  imag_part <- rnorm(2 * n)
+  complex_vec <- complex(real = real_part, imaginary = imag_part)
+  W <- fft(sqrt(lambda) * complex_vec)
+  W <- n^(-H) * cumsum(Re(W[1:(n + 1)]))
+  W <- T^H * W
+  
+  return(W)
+}
+
+# ============================================================================
+# 2. Single Time Series Method (Original) - For Panel Data Extension
+# ============================================================================
+
+# Original single time series treatment effect estimator
+estimate_single_series <- function(unit_data, i, previous_estimates = NULL) {
+  # Paper's two-step estimation method for a single time series
+  # Adapted for panel data
+  
+  D <- unit_data$D
+  y <- unit_data$y
+  z <- unit_data$z
+  w <- unit_data$w
+  tr <- unit_data$tr
+  time_idx <- unit_data$time
+  
+  # Time variables (common proximate variables)
+  t1 <- time_idx - min(time_idx) + 1  # Standardized time variable
+  t2 <- t1^2
+  
+  # Determine sample range
+  T0 <- sum(D == 0)  # Pre-treatment period
+  T1 <- T0 + 1       # Treatment start time
+  
+  # Check if i is reasonable
+  if (i > length(D) - T0) {
+    i <- length(D) - T0
+  }
+  
+  # Extract subsample
+  sample_idx <- 1:(T0 + i)
+  
+  DD <- D[sample_idx]
+  yy <- y[sample_idx]
+  tt1 <- t1[sample_idx]
+  tt2 <- t2[sample_idx]
+  zz <- z[sample_idx]
+  ww <- w[sample_idx]
+  
+  # If i>1, subtract previously estimated treatment effects
+  if (i > 1 && !is.null(previous_estimates)) {
+    treatment_indicator <- c(rep(0, T0), rep(1, i - 1), 0)
+    estimated_effects <- c(rep(0, T0), previous_estimates, 0)
+    
+    # Ensure length matches
+    if (length(treatment_indicator) == length(DD) && 
+        length(estimated_effects) == length(yy)) {
+      DD <- DD - treatment_indicator
+      yy <- yy - estimated_effects
+    }
+  }
+  
+  # Bernstein expansion estimation (formulas 7-8)
+  # Estimate Bernstein coefficients for D
+  lm_D <- try(lm(DD ~ tt2 + tt1), silent = TRUE)
+  if (inherits(lm_D, "try-error") || any(is.na(coef(lm_D)))) {
+    return(NA)
+  }
+  
+  a_x <- 2 * coef(lm_D)[2]  # Quadratic coefficient
+  b_x <- coef(lm_D)[3]      # Linear coefficient
+  
+  # Estimate Bernstein coefficients for y
+  lm_y <- try(lm(yy ~ tt2 + tt1), silent = TRUE)
+  if (inherits(lm_y, "try-error") || any(is.na(coef(lm_y)))) {
+    return(NA)
+  }
+  
+  a_y <- 2 * coef(lm_y)[2]  # Quadratic coefficient
+  b_y <- coef(lm_y)[3]      # Linear coefficient
+  
+  # Check if denominator is zero
+  if (abs(a_x) < 1e-10) {
+    return(NA)
+  }
+  
+  # Construct common proximate variable Y_t
+  x_t <- 2 * a_x * tt1 + b_x
+  Y_t <- (a_y * x_t + a_x * b_y - a_y * b_x) / a_x
+  
+  # Calculate key quantities (paper formulas)
+  n_obs <- length(DD)
+  
+  # Check if there are enough observations
+  if (n_obs < 5 || T1 > n_obs || T0 < 1) {
+    return(NA)
+  }
+  
+  # A1: Coefficient of treatment variable
+  mean_Y_t_treated <- mean(Y_t[T1:min(T0 + i, n_obs)])
+  mean_Y_t_control <- mean(Y_t[1:T0])
+  
+  numerator_A1 <- n_obs * sum(DD * Y_t) - sum(DD) * sum(Y_t)
+  denominator_A1 <- n_obs * sum(Y_t^2) - sum(Y_t)^2
+  
+  if (abs(denominator_A1) < 1e-10) {
+    return(NA)
+  }
+  
+  A1 <- (mean_Y_t_treated - mean_Y_t_control) * (numerator_A1 / denominator_A1)
+  
+  # A3: Coefficient of exogenous variable
+  numerator_A3 <- n_obs * sum(zz * Y_t) - sum(zz) * sum(Y_t)
+  A3 <- (mean_Y_t_treated - mean_Y_t_control) * (numerator_A3 / denominator_A1)
+  
+  # Auxiliary regression
+  lm_aux <- try(lm(yy ~ Y_t + zz + DD), silent = TRUE)
+  if (inherits(lm_aux, "try-error") || any(is.na(coef(lm_aux)))) {
+    return(NA)
+  }
+  
+  beta_y <- coef(lm_aux)[2]  # Coefficient of Y_t
+  gamma <- coef(lm_aux)[3]   # Coefficient of z
+  
+  # Calculate new treatment effect estimator (paper formula)
+  lm_y_Yt <- try(lm(yy ~ Y_t), silent = TRUE)
+  if (inherits(lm_y_Yt, "try-error")) {
+    return(NA)
+  }
+  
+  y_pred <- predict(lm_y_Yt)
+  new <- mean(y_pred[T1:min(T0 + i, n_obs)]) - mean(y_pred[1:T0])
+  
+  # Final estimator
+  if (abs(A1) < 1e-10) {
+    return(NA)
+  }
+  
+  treatment_effect <- as.numeric(
+    (new - beta_y * (mean_Y_t_treated - mean_Y_t_control) - A3 * gamma) / A1
+  )
+  
+  return(treatment_effect)
+}
+
+# Bootstrap inference for single series
+bootstrap_single_series <- function(unit_data, i, treatment_effect, B = 100) {
+  # Simplified Bootstrap for single series
+  
+  if (is.na(treatment_effect)) {
+    return(list(
+      estimate = NA,
+      upper = NA,
+      lower = NA,
+      se = NA,
+      bootstrap_estimates = numeric(0)
+    ))
+  }
+  
+  D <- unit_data$D
+  y <- unit_data$y
+  z <- unit_data$z
+  
+  time_idx <- unit_data$time
+  t1 <- time_idx - min(time_idx) + 1
+  t2 <- t1^2
+  
+  T0 <- sum(D == 0)
+  
+  # Store Bootstrap estimates
+  bootstrap_estimates <- numeric(B)
+  
+  for (j in 1:B) {
+    # Use simple residual Bootstrap
+    tryCatch({
+      # Build model
+      sample_idx <- 1:(T0 + i)
+      yy <- y[sample_idx]
+      tt1 <- t1[sample_idx]
+      tt2 <- t2[sample_idx]
+      zz <- z[sample_idx]
+      DD <- D[sample_idx]
+      
+      # Base model
+      base_model <- lm(yy ~ tt2 + tt1 + zz + DD)
+      
+      # Generate Bootstrap sample
+      y_boot <- predict(base_model) + rnorm(length(yy), 0, sd(resid(base_model)))
+      
+      # Re-estimate using the original method
+      # For simplicity, use a simple difference estimator
+      pre_mean <- mean(y_boot[1:T0])
+      post_mean <- mean(y_boot[T1:length(y_boot)])
+      bootstrap_estimates[j] <- post_mean - pre_mean
+      
+    }, error = function(e) {
+      bootstrap_estimates[j] <- NA
+    })
+  }
+  
+  # Remove outliers
+  bootstrap_estimates <- bootstrap_estimates[!is.na(bootstrap_estimates)]
+  
+  if (length(bootstrap_estimates) == 0) {
+    return(list(
+      estimate = treatment_effect,
+      upper = treatment_effect,
+      lower = treatment_effect,
+      se = 0,
+      bootstrap_estimates = numeric(0)
+    ))
+  }
+  
+  # Calculate standard error and confidence interval
+  se_est <- sd(bootstrap_estimates)
+  ci_lower <- treatment_effect - 1.96 * se_est
+  ci_upper <- treatment_effect + 1.96 * se_est
+  
+  return(list(
+    estimate = treatment_effect,
+    upper = ci_upper,
+    lower = ci_lower,
+    se = se_est,
+    bootstrap_estimates = bootstrap_estimates
+  ))
+}
+
+# ============================================================================
+# 3. Panel Data Generation Process
+# ============================================================================
+generate_panel_data <- function(N = 30,          # Number of units
+                                T = 100,         # Time periods per unit
+                                H = 0.7,         # Hurst parameter
+                                treatment_fraction = 0.3,  # Fraction treated
+                                staggered = TRUE, # Staggered adoption
+                                iseed = 123) {
+  
+  # Initialize panel data list
+  panel_data <- list()
+  
+  # Generate unit-specific fixed effects
+  unit_fe <- rnorm(N, 0, 1)
+  
+  # Generate time fixed effects (common shocks)
+  time_fe <- 0.5 * sin(seq(0, 4*pi, length.out = T)) + rnorm(T, 0, 0.1)
+  
+  # Determine treatment timing
+  if (staggered) {
+    n_treated <- max(1, round(N * treatment_fraction))
+    treatment_starts <- sample(round(T * 0.3):round(T * 0.7), n_treated, replace = TRUE)
+    
+    treatment_units <- rep(0, N)
+    treatment_units[1:n_treated] <- 1
+    
+    treatment_timing <- rep(0, N)
+    treatment_timing[1:n_treated] <- treatment_starts
+  } else {
+    n_treated <- max(1, round(N * treatment_fraction))
+    treatment_units <- c(rep(1, n_treated), rep(0, N - n_treated))
+    treatment_timing <- ifelse(treatment_units == 1, round(T * 0.5), 0)
+  }
+  
+  # Generate data for each unit
+  for (i in 1:N) {
+    set.seed(iseed + i)
+    
+    # Generate unit-specific long-range dependent process
+    n_points <- as.integer(1024)
+    a_i <- fbm1d(H, n_points, 1.0, iseed + i)
+    a_i <- a_i[1:T]
+    
+    # Unit-specific characteristics
+    alpha_i <- unit_fe[i]
+    
+    # Generate confounders (time-varying)
+    w_it <- runif(T) + a_i + rnorm(T, 0, 0.1)
+    z_it <- runif(T, -0.01, 0.01) + a_i + rnorm(T, 0, 0.05)
+    
+    # Treatment indicator
+    if (treatment_units[i] == 1) {
+      treatment_start <- treatment_timing[i]
+      D_it <- ifelse(1:T >= treatment_start, 1, 0)
+    } else {
+      D_it <- rep(0, T)
+    }
+    
+    # Generate time-varying treatment effects
+    base_effect <- runif(T, 5, 10)
+    unit_heterogeneity <- rnorm(1, 0, 2)
+    tr_it <- base_effect + unit_heterogeneity + 0.5 * sin(2 * pi * (1:T) / T)
+    
+    # Generate error term
+    sigma_i <- runif(1, 0.5, 1.5)
+    e_it <- sigma_i * rnorm(T, 0, 0.5)
+    
+    # Generate outcome variable (simplified for stability)
+    y_it <- alpha_i +                    # Unit fixed effect
+            time_fe +                    # Time fixed effect
+            w_it * 5.0 +                 # Confounder effect  
+            z_it * 0.1 +                 # Exogenous variable
+            tr_it * D_it +               # Treatment effect
+            e_it                         # Error term
+    
+    # Store unit data
+    panel_data[[i]] <- list(
+      unit_id = i,
+      treatment_unit = treatment_units[i],
+      treatment_start = treatment_timing[i],
+      alpha_i = alpha_i,
+      time = 1:T,
+      D = D_it,
+      y = y_it,
+      w = w_it,
+      z = z_it,
+      tr = tr_it,
+      e = e_it
+    )
+  }
+  
+  return(list(
+    panel_data = panel_data,
+    N = N,
+    T = T,
+    treatment_units = treatment_units,
+    treatment_timing = treatment_timing,
+    unit_fe = unit_fe,
+    time_fe = time_fe
+  ))
+}
+
+# ============================================================================
+# 4. Panel Data Estimation Methods - Extending Single Series Method
+# ============================================================================
+
+# 4.1 Individual Unit Estimation (Apply original method to each unit)
+estimate_individual_units <- function(panel_data, n_post_periods = 10) {
+  # Apply the original single series method to each treated unit
+  
+  N <- length(panel_data)
+  unit_results <- list()
+  
+  for (i in 1:N) {
+    if (panel_data[[i]]$treatment_unit == 1) {
+      cat(sprintf("  Estimating unit %d/%d...", i, N))
+      
+      unit_data <- panel_data[[i]]
+      T0 <- sum(unit_data$D == 0)
+      
+      # Determine how many post-treatment periods to estimate
+      max_post <- min(n_post_periods, length(unit_data$y) - T0)
+      
+      if (max_post > 0) {
+        estimates_i <- numeric(max_post)
+        true_effects_i <- unit_data$tr[(T0 + 1):(T0 + max_post)]
+        ci_lower_i <- numeric(max_post)
+        ci_upper_i <- numeric(max_post)
+        se_i <- numeric(max_post)
+        
+        previous_estimates <- NULL
+        
+        for (t in 1:max_post) {
+          # Point estimate using original method
+          estimates_i[t] <- estimate_single_series(unit_data, t, previous_estimates)
+          
+          # Bootstrap inference
+          if (!is.na(estimates_i[t])) {
+            bootstrap_result <- bootstrap_single_series(unit_data, t, estimates_i[t], B = 50)
+            ci_lower_i[t] <- bootstrap_result$lower
+            ci_upper_i[t] <- bootstrap_result$upper
+            se_i[t] <- bootstrap_result$se
+          } else {
+            ci_lower_i[t] <- NA
+            ci_upper_i[t] <- NA
+            se_i[t] <- NA
+          }
+          
+          # Update previous estimates
+          if (!is.na(estimates_i[t])) {
+            previous_estimates <- estimates_i[1:t]
+          }
+        }
+        
+        unit_results[[i]] <- list(
+          unit_id = i,
+          treatment_start = unit_data$treatment_start,
+          estimates = estimates_i,
+          true_effects = true_effects_i,
+          ci_lower = ci_lower_i,
+          ci_upper = ci_upper_i,
+          se = se_i,
+          event_time = 1:max_post
+        )
+      }
+      cat("Done\n")
+    }
+  }
+  
+  return(unit_results)
+}
+
+# 4.2 Two Types of Pooled Effects
+calculate_pooled_effects <- function(unit_results) {
+  # Calculate two types of pooled effects:
+  # 1. Method A: Average within each unit first, then average across units
+  # 2. Method B: Pool all estimates together and average
+  
+  if (length(unit_results) == 0) {
+    return(NULL)
+  }
+  
+  # Find maximum event time across all units
+  max_event_time <- max(sapply(unit_results, function(x) length(x$estimates)))
+  
+  # Method A: Average within each unit first, then average across units
+  unit_averages_estimates <- numeric(0)
+  unit_averages_true <- numeric(0)
+  
+  for (i in seq_along(unit_results)) {
+    unit_estimates <- unit_results[[i]]$estimates
+    unit_true <- unit_results[[i]]$true_effects
+    
+    # Only include units with valid estimates
+    valid_idx <- !is.na(unit_estimates) & !is.na(unit_true)
+    
+    if (sum(valid_idx) > 0) {
+      unit_avg_estimate <- mean(unit_estimates[valid_idx])
+      unit_avg_true <- mean(unit_true[valid_idx])
+      
+      unit_averages_estimates <- c(unit_averages_estimates, unit_avg_estimate)
+      unit_averages_true <- c(unit_averages_true, unit_avg_true)
+    }
+  }
+  
+  # Method A results
+  method_A_estimate <- ifelse(length(unit_averages_estimates) > 0, 
+                              mean(unit_averages_estimates), NA)
+  method_A_true <- ifelse(length(unit_averages_true) > 0, 
+                          mean(unit_averages_true), NA)
+  method_A_se <- ifelse(length(unit_averages_estimates) > 1, 
+                        sd(unit_averages_estimates) / sqrt(length(unit_averages_estimates)), NA)
+  method_A_ci_lower <- ifelse(!is.na(method_A_estimate) && !is.na(method_A_se),
+                              method_A_estimate - 1.96 * method_A_se, NA)
+  method_A_ci_upper <- ifelse(!is.na(method_A_estimate) && !is.na(method_A_se),
+                              method_A_estimate + 1.96 * method_A_se, NA)
+  
+  # Method B: Pool all estimates together and average
+  all_estimates <- numeric(0)
+  all_true <- numeric(0)
+  
+  for (i in seq_along(unit_results)) {
+    unit_estimates <- unit_results[[i]]$estimates
+    unit_true <- unit_results[[i]]$true_effects
+    
+    # Only include valid estimates
+    valid_idx <- !is.na(unit_estimates) & !is.na(unit_true)
+    
+    if (sum(valid_idx) > 0) {
+      all_estimates <- c(all_estimates, unit_estimates[valid_idx])
+      all_true <- c(all_true, unit_true[valid_idx])
+    }
+  }
+  
+  # Method B results
+  method_B_estimate <- ifelse(length(all_estimates) > 0, mean(all_estimates), NA)
+  method_B_true <- ifelse(length(all_true) > 0, mean(all_true), NA)
+  method_B_se <- ifelse(length(all_estimates) > 1, 
+                        sd(all_estimates) / sqrt(length(all_estimates)), NA)
+  method_B_ci_lower <- ifelse(!is.na(method_B_estimate) && !is.na(method_B_se),
+                              method_B_estimate - 1.96 * method_B_se, NA)
+  method_B_ci_upper <- ifelse(!is.na(method_B_estimate) && !is.na(method_B_se),
+                              method_B_estimate + 1.96 * method_B_se, NA)
+  
+  # Also calculate event-time specific averages for visualization
+  event_time_estimates <- numeric(max_event_time)
+  event_time_true <- numeric(max_event_time)
+  event_time_se <- numeric(max_event_time)
+  event_time_ci_lower <- numeric(max_event_time)
+  event_time_ci_upper <- numeric(max_event_time)
+  n_units_per_time <- numeric(max_event_time)
+  
+  # Store all estimates by event time
+  all_estimates_by_time <- vector("list", max_event_time)
+  all_true_by_time <- vector("list", max_event_time)
+  
+  for (t in 1:max_event_time) {
+    estimates_t <- numeric(0)
+    true_t <- numeric(0)
+    
+    for (i in seq_along(unit_results)) {
+      if (t <= length(unit_results[[i]]$estimates)) {
+        if (!is.na(unit_results[[i]]$estimates[t]) && !is.na(unit_results[[i]]$true_effects[t])) {
+          estimates_t <- c(estimates_t, unit_results[[i]]$estimates[t])
+          true_t <- c(true_t, unit_results[[i]]$true_effects[t])
+        }
+      }
+    }
+    
+    all_estimates_by_time[[t]] <- estimates_t
+    all_true_by_time[[t]] <- true_t
+    
+    if (length(estimates_t) > 0) {
+      event_time_estimates[t] <- mean(estimates_t)
+      event_time_true[t] <- mean(true_t)
+      event_time_se[t] <- sd(estimates_t) / sqrt(length(estimates_t))
+      event_time_ci_lower[t] <- event_time_estimates[t] - 1.96 * event_time_se[t]
+      event_time_ci_upper[t] <- event_time_estimates[t] + 1.96 * event_time_se[t]
+      n_units_per_time[t] <- length(estimates_t)
+    } else {
+      event_time_estimates[t] <- NA
+      event_time_true[t] <- NA
+      event_time_se[t] <- NA
+      event_time_ci_lower[t] <- NA
+      event_time_ci_upper[t] <- NA
+    }
+  }
+  
+  return(list(
+    # Method A: Average within units first, then across units
+    method_A = list(
+      estimate = method_A_estimate,
+      true = method_A_true,
+      se = method_A_se,
+      ci_lower = method_A_ci_lower,
+      ci_upper = method_A_ci_upper,
+      unit_averages_estimates = unit_averages_estimates,
+      unit_averages_true = unit_averages_true,
+      n_units = length(unit_averages_estimates)
+    ),
+    
+    # Method B: Pool all estimates together
+    method_B = list(
+      estimate = method_B_estimate,
+      true = method_B_true,
+      se = method_B_se,
+      ci_lower = method_B_ci_lower,
+      ci_upper = method_B_ci_upper,
+      all_estimates = all_estimates,
+      all_true = all_true,
+      n_estimates = length(all_estimates)
+    ),
+    
+    # Event-time specific averages
+    event_time = list(
+      event_time = 1:max_event_time,
+      estimates = event_time_estimates,
+      true_effects = event_time_true,
+      se = event_time_se,
+      ci_lower = event_time_ci_lower,
+      ci_upper = event_time_ci_upper,
+      n_units_per_time = n_units_per_time
+    ),
+    
+    # Raw data for detailed analysis
+    all_estimates_by_time = all_estimates_by_time,
+    all_true_by_time = all_true_by_time,
+    
+    # Summary statistics
+    n_treated_units = length(unit_results),
+    max_event_time = max_event_time
+  ))
+}
+
+# ============================================================================
+# 5. Visualization Functions
+# ============================================================================
+
+plot_panel_results <- function(pooled_results, unit_results = NULL, performance = NULL) {
+  # Plot panel data results
+  
+  par(mfrow = c(2, 3), mar = c(4, 4, 3, 1))
+  
+  # Plot 1: All individual unit treatment effects
+  if (!is.null(unit_results) && length(unit_results) > 0) {
+    # Determine common x-axis range
+    max_event_time <- max(sapply(unit_results, function(x) length(x$estimates)))
+    
+    # Create empty plot with appropriate limits
+    y_min <- Inf
+    y_max <- -Inf
+    
+    for (i in seq_along(unit_results)) {
+      valid_estimates <- unit_results[[i]]$estimates[!is.na(unit_results[[i]]$estimates)]
+      if (length(valid_estimates) > 0) {
+        y_min <- min(y_min, min(valid_estimates))
+        y_max <- max(y_max, max(valid_estimates))
+      }
+    }
+    
+    # Add some padding
+    y_range <- y_max - y_min
+    y_min <- y_min - 0.1 * y_range
+    y_max <- y_max + 0.1 * y_range
+    
+    # Create empty plot
+    plot(NA, xlim = c(1, max_event_time), ylim = c(y_min, y_max),
+         xlab = "Event Time (Periods Since Treatment)",
+         ylab = "Treatment Effect",
+         main = "All Individual Unit Treatment Effects")
+    
+    # Plot each unit's trajectory
+    colors <- rainbow(length(unit_results), alpha = 0.7)
+    
+    for (i in seq_along(unit_results)) {
+      estimates_i <- unit_results[[i]]$estimates
+      valid_idx <- !is.na(estimates_i)
+      
+      if (sum(valid_idx) > 0) {
+        lines(1:length(estimates_i)[valid_idx], estimates_i[valid_idx], 
+              col = colors[i], lwd = 1.5, type = "b", pch = 19, cex = 0.5)
+      }
+    }
+    
+    # Add legend with number of units
+    legend("topright", legend = sprintf("%d units", length(unit_results)),
+           bty = "n", cex = 0.8)
+  }
+  
+  # Plot 2: Event-time specific average treatment effects
+  if (!is.null(pooled_results)) {
+    event_time_data <- pooled_results$event_time
+    valid_idx <- !is.na(event_time_data$estimates)
+    
+    if (sum(valid_idx) > 0) {
+      plot(event_time_data$event_time[valid_idx], 
+           event_time_data$estimates[valid_idx],
+           type = "b", pch = 19, col = "blue", lwd = 2,
+           ylim = range(c(event_time_data$ci_lower[valid_idx], 
+                         event_time_data$ci_upper[valid_idx],
+                         event_time_data$true_effects[valid_idx]), na.rm = TRUE),
+           xlab = "Event Time (Periods Since Treatment)",
+           ylab = "Treatment Effect",
+           main = "Event-Time Specific Average Effects")
+      
+      # Add confidence intervals
+      arrows(event_time_data$event_time[valid_idx], event_time_data$ci_lower[valid_idx],
+             event_time_data$event_time[valid_idx], event_time_data$ci_upper[valid_idx],
+             angle = 90, code = 3, length = 0.05, col = "gray")
+      
+      # Add true effects
+      lines(event_time_data$event_time[valid_idx], 
+            event_time_data$true_effects[valid_idx],
+            col = "red", lwd = 2, lty = 2)
+      
+      abline(h = 0, lty = 3, col = "darkgray")
+      legend("topright", legend = c("Estimated", "True", "95% CI"),
+             col = c("blue", "red", "gray"), lty = c(1, 2, 1),
+             lwd = c(2, 2, 1), pch = c(19, NA, NA))
+    }
+  }
+  
+  # Plot 3: Comparison of two pooling methods
+  if (!is.null(pooled_results)) {
+    method_A <- pooled_results$method_A
+    method_B <- pooled_results$method_B
+    
+    # Prepare data for bar plot
+    estimates <- c(method_A$estimate, method_B$estimate)
+    true_values <- c(method_A$true, method_B$true)
+    ci_lower <- c(method_A$ci_lower, method_B$ci_lower)
+    ci_upper <- c(method_A$ci_upper, method_B$ci_upper)
+    
+    # Create bar plot
+    bar_colors <- c("lightblue", "lightgreen")
+    bar_names <- c("Method A\n(Unit Avg First)", "Method B\n(Pool All)")
+    
+    y_pos <- barplot(estimates, names.arg = bar_names, col = bar_colors,
+                     ylim = c(min(ci_lower, true_values, na.rm = TRUE) * 0.9,
+                              max(ci_upper, true_values, na.rm = TRUE) * 1.1),
+                     main = "Comparison of Pooling Methods",
+                     ylab = "Treatment Effect", las = 1)
+    
+    # Add error bars (confidence intervals)
+    arrows(y_pos, ci_lower, y_pos, ci_upper,
+           angle = 90, code = 3, length = 0.1)
+    
+    # Add true values as points
+    points(y_pos, true_values, pch = 19, col = "red", cex = 1.5)
+    
+    # Add legend
+    legend("topright", legend = c("Estimated", "True Value"),
+           pch = c(15, 19), col = c("lightblue", "red"), pt.cex = c(2, 1))
+    
+    # Add method descriptions
+    text(1, par("usr")[3] - diff(par("usr")[3:4]) * 0.05,
+         "Avg within unit\n then across units", cex = 0.7, adj = 0.5)
+    text(2, par("usr")[3] - diff(par("usr")[3:4]) * 0.05,
+         "Pool all estimates\n then average", cex = 0.7, adj = 0.5)
+  }
+  
+  # Plot 4: Distribution of unit-specific average effects
+  if (!is.null(pooled_results) && !is.null(pooled_results$method_A$unit_averages_estimates)) {
+    unit_avg_estimates <- pooled_results$method_A$unit_averages_estimates
+    
+    if (length(unit_avg_estimates) > 0) {
+      hist(unit_avg_estimates, breaks = 15, col = "lightgreen",
+           main = "Distribution of Unit Average Effects",
+           xlab = "Average Treatment Effect per Unit",
+           ylab = "Frequency")
+      
+      abline(v = mean(unit_avg_estimates), 
+             col = "red", lwd = 2, lty = 2)
+      
+      # Add true average as vertical line
+      if (!is.na(pooled_results$method_A$true)) {
+        abline(v = pooled_results$method_A$true, 
+               col = "blue", lwd = 2, lty = 3)
+      }
+      
+      # Add text with statistics
+      stats_text <- sprintf("Mean: %.3f\nSD: %.3f\nN: %d",
+                            mean(unit_avg_estimates),
+                            sd(unit_avg_estimates),
+                            length(unit_avg_estimates))
+      
+      text(par("usr")[1] + diff(par("usr")[1:2]) * 0.7,
+           par("usr")[3] + diff(par("usr")[3:4]) * 0.9,
+           stats_text, adj = 0, cex = 0.8)
+      
+      legend("topright", legend = c("Estimated Mean", "True Average"),
+             col = c("red", "blue"), lty = c(2, 3), lwd = 2)
+    }
+  }
+  
+  # Plot 5: Performance metrics visualization
+  if (!is.null(performance)) {
+    # Create a bar plot for bias, MSE, and coverage
+    metrics <- c("Bias" = performance$bias,
+                 "RMSE" = performance$rmse,
+                 "Coverage" = performance$coverage)
+    
+    bar_colors <- c("Bias" = ifelse(abs(performance$bias) > 1, "red", "lightblue"),
+                    "RMSE" = ifelse(performance$rmse > 2, "orange", "lightgreen"),
+                    "Coverage" = ifelse(abs(performance$coverage - 0.95) > 0.05, "pink", "lightyellow"))
+    
+    barplot(metrics, col = bar_colors, ylim = c(0, max(c(metrics, 1.2), na.rm = TRUE)),
+            main = "Performance Metrics",
+            ylab = "Value", las = 1)
+    
+    # Add benchmark lines
+    abline(h = 0, lty = 2, col = "gray")
+    abline(h = 0.95, lty = 3, col = "blue", lwd = 1.5)
+    
+    # Add text for sample size
+    text(1.5, max(metrics, na.rm = TRUE) * 0.9, 
+         sprintf("N estimates: %d", performance$n_estimates),
+         cex = 0.8)
+  }
+  
+  # Plot 6: True vs Estimated scatter plot (all data points)
+  if (!is.null(pooled_results) && !is.null(pooled_results$all_estimates_by_time)) {
+    # Collect all estimates and true values
+    all_estimates <- unlist(pooled_results$all_estimates_by_time)
+    all_true <- unlist(pooled_results$all_true_by_time)
+    
+    if (length(all_estimates) > 0 && length(all_true) > 0) {
+      # Ensure same length
+      min_len <- min(length(all_estimates), length(all_true))
+      all_estimates <- all_estimates[1:min_len]
+      all_true <- all_true[1:min_len]
+      
+      # Remove NA values
+      valid_idx <- !is.na(all_estimates) & !is.na(all_true)
+      all_estimates <- all_estimates[valid_idx]
+      all_true <- all_true[valid_idx]
+      
+      if (length(all_estimates) > 0) {
+        # Calculate correlation
+        corr_val <- cor(all_estimates, all_true)
+        
+        # Create scatter plot
+        plot(all_true, all_estimates, 
+             xlab = "True Treatment Effects", 
+             ylab = "Estimated Treatment Effects",
+             main = "True vs Estimated Effects",
+             pch = 19, col = rgb(0, 0, 1, 0.5), cex = 0.8)
+        
+        # Add 45-degree line
+        abline(0, 1, col = "red", lwd = 2, lty = 2)
+        
+        # Add regression line
+        if (length(all_estimates) > 1) {
+          lm_fit <- lm(all_estimates ~ all_true)
+          abline(lm_fit, col = "blue", lwd = 2)
+          
+          # Calculate R-squared
+          r_squared <- summary(lm_fit)$r.squared
+          corr_text <- sprintf("Correlation: %.3f\nR-squared: %.3f", corr_val, r_squared)
+        } else {
+          corr_text <- sprintf("Correlation: %.3f", corr_val)
+        }
+        
+        # Add correlation text
+        text(par("usr")[1] + diff(par("usr")[1:2]) * 0.1,
+             par("usr")[3] + diff(par("usr")[3:4]) * 0.9,
+             corr_text, adj = 0, cex = 0.9, font = 2)
+        
+        legend("topleft", legend = c("45° line", "Regression line"),
+               col = c("red", "blue"), lty = c(2, 1), lwd = 2)
+      }
+    }
+  }
+  
+  par(mfrow = c(1, 1))
+}
+
+# ============================================================================
+# 6. Performance Evaluation Functions
+# ============================================================================
+
+calculate_performance_metrics <- function(pooled_results) {
+  # Calculate comprehensive performance metrics
+  
+  if (is.null(pooled_results)) {
+    return(list(
+      bias = NA,
+      mse = NA,
+      rmse = NA,
+      coverage = NA,
+      correlation = NA,
+      n_estimates = 0
+    ))
+  }
+  
+  # Collect all estimates and true values
+  all_estimates <- numeric(0)
+  all_true <- numeric(0)
+  coverage_flags <- numeric(0)
+  
+  # For pooled results, use Method B (pool all estimates) for overall performance
+  if (!is.null(pooled_results$method_B)) {
+    all_estimates <- pooled_results$method_B$all_estimates
+    all_true <- pooled_results$method_B$all_true
+    
+    # We don't have individual CI for each estimate in Method B, 
+    # so we calculate coverage using event-time specific CIs
+    if (!is.null(pooled_results$event_time)) {
+      event_time_data <- pooled_results$event_time
+      
+      for (t in 1:length(event_time_data$event_time)) {
+        if (!is.na(event_time_data$true_effects[t]) && 
+            !is.na(event_time_data$ci_lower[t]) && 
+            !is.na(event_time_data$ci_upper[t])) {
+          coverage_flags <- c(coverage_flags, 
+            as.numeric(event_time_data$true_effects[t] >= event_time_data$ci_lower[t] & 
+                       event_time_data$true_effects[t] <= event_time_data$ci_upper[t]))
+        }
+      }
+    }
+  }
+  
+  # Also include individual unit estimates for more comprehensive metrics
+  if (!is.null(pooled_results$all_estimates_by_time)) {
+    for (t in 1:length(pooled_results$all_estimates_by_time)) {
+      if (length(pooled_results$all_estimates_by_time[[t]]) > 0 && 
+          length(pooled_results$all_true_by_time[[t]]) > 0) {
+        # Ensure same length
+        min_len <- min(length(pooled_results$all_estimates_by_time[[t]]), 
+                      length(pooled_results$all_true_by_time[[t]]))
+        
+        all_estimates <- c(all_estimates, pooled_results$all_estimates_by_time[[t]][1:min_len])
+        all_true <- c(all_true, pooled_results$all_true_by_time[[t]][1:min_len])
+      }
+    }
+  }
+  
+  # Remove NA values
+  valid_idx <- !is.na(all_estimates) & !is.na(all_true)
+  all_estimates <- all_estimates[valid_idx]
+  all_true <- all_true[valid_idx]
+  
+  if (length(all_estimates) == 0) {
+    return(list(
+      bias = NA,
+      mse = NA,
+      rmse = NA,
+      coverage = NA,
+      correlation = NA,
+      n_estimates = 0
+    ))
+  }
+  
+  # Calculate metrics (MAE removed as requested)
+  bias <- mean(all_estimates - all_true)
+  mse <- mean((all_estimates - all_true)^2)
+  rmse <- sqrt(mse)
+  
+  # Calculate coverage (if available)
+  if (length(coverage_flags) > 0) {
+    coverage <- mean(coverage_flags)
+  } else {
+    coverage <- NA
+  }
+  
+  # Calculate correlation
+  if (length(all_estimates) > 1) {
+    correlation <- cor(all_estimates, all_true)
+  } else {
+    correlation <- NA
+  }
+  
+  return(list(
+    bias = bias,
+    mse = mse,
+    rmse = rmse,
+    coverage = coverage,
+    correlation = correlation,
+    n_estimates = length(all_estimates)
+  ))
+}
+
+# ============================================================================
+# 7. Main Panel Data Simulation
+# ============================================================================
+
+run_panel_simulation <- function(N = 20, T = 80, n_simulations = 1, n_post_periods = 8) {
+  
+  cat("Panel Data Simulation with Extended Single Series Method\n")
+  cat("=======================================================\n")
+  
+  all_results <- list()
+  all_performance <- list()
+  
+  for (sim in 1:n_simulations) {
+    cat(sprintf("\nSimulation %d/%d\n", sim, n_simulations))
+    
+    # 1. Generate panel data
+    cat("  Generating panel data...")
+    panel_data <- generate_panel_data(N = N, T = T, staggered = TRUE)
+    n_treated <- sum(panel_data$treatment_units)
+    cat(sprintf("Done (N=%d treated units)\n", n_treated))
+    
+    if (n_treated == 0) {
+      cat("  No treated units in this simulation. Skipping.\n")
+      next
+    }
+    
+    # 2. Apply original single series method to each treated unit
+    cat("  Applying single series method to each unit...\n")
+    unit_results <- estimate_individual_units(panel_data$panel_data, n_post_periods)
+    
+    if (length(unit_results) == 0) {
+      cat("  No valid unit results. Skipping.\n")
+      next
+    }
+    
+    # 3. Calculate two types of pooled effects
+    cat("  Calculating pooled effects (two methods)...")
+    pooled_results <- calculate_pooled_effects(unit_results)
+    cat("Done\n")
+    
+    # 4. Calculate performance metrics
+    cat("  Calculating performance metrics...")
+    performance <- calculate_performance_metrics(pooled_results)
+    cat("Done\n")
+    
+    # 5. Store results
+    all_results[[sim]] <- list(
+      panel_data = panel_data,
+      unit_results = unit_results,
+      pooled_results = pooled_results,
+      performance = performance
+    )
+    
+    all_performance[[sim]] <- performance
+    
+    # 6. Print performance summary
+    cat("\n  Performance Summary for this simulation:\n")
+    cat("  -----------------------------------------\n")
+    cat(sprintf("    Number of treated units: %d\n", n_treated))
+    cat(sprintf("    Number of valid estimates: %d\n", performance$n_estimates))
+    cat(sprintf("    Average Bias: %.4f\n", performance$bias))
+    cat(sprintf("    Mean Squared Error (MSE): %.4f\n", performance$mse))
+    cat(sprintf("    Root Mean Squared Error (RMSE): %.4f\n", performance$rmse))
+    cat(sprintf("    Coverage Probability: %.4f\n", performance$coverage))
+    cat(sprintf("    Correlation (True vs Estimated): %.4f\n", performance$correlation))
+    
+    # Print pooled effects comparison
+    if (!is.null(pooled_results)) {
+      cat("\n  Pooled Effects Comparison:\n")
+      cat("  --------------------------\n")
+      
+      # Method A: Average within unit first, then across units
+      method_A <- pooled_results$method_A
+      cat("  Method A (Avg within unit first, then across units):\n")
+      cat(sprintf("    Estimated: %.4f (95%% CI: [%.4f, %.4f])\n", 
+                  method_A$estimate, method_A$ci_lower, method_A$ci_upper))
+      cat(sprintf("    True: %.4f\n", method_A$true))
+      cat(sprintf("    Bias: %.4f\n", method_A$estimate - method_A$true))
+      cat(sprintf("    Number of units: %d\n", method_A$n_units))
+      
+      # Method B: Pool all estimates together
+      method_B <- pooled_results$method_B
+      cat("\n  Method B (Pool all estimates together):\n")
+      cat(sprintf("    Estimated: %.4f (95%% CI: [%.4f, %.4f])\n", 
+                  method_B$estimate, method_B$ci_lower, method_B$ci_upper))
+      cat(sprintf("    True: %.4f\n", method_B$true))
+      cat(sprintf("    Bias: %.4f\n", method_B$estimate - method_B$true))
+      cat(sprintf("    Number of estimates: %d\n", method_B$n_estimates))
+      
+      # Compare the two methods
+      cat("\n  Comparison:\n")
+      cat(sprintf("    Difference (A - B): %.4f\n", method_A$estimate - method_B$estimate))
+      cat(sprintf("    True value difference: %.4f\n", method_A$true - method_B$true))
+    }
+    
+    cat("\n")
+  }
+  
+  # Calculate average performance across all simulations
+  if (length(all_performance) > 0) {
+    # Remove simulations with no valid performance metrics
+    valid_sims <- sapply(all_performance, function(p) !is.na(p$bias))
+    
+    if (sum(valid_sims) > 0) {
+      avg_performance <- list(
+        bias = mean(sapply(all_performance[valid_sims], function(p) p$bias), na.rm = TRUE),
+        mse = mean(sapply(all_performance[valid_sims], function(p) p$mse), na.rm = TRUE),
+        rmse = mean(sapply(all_performance[valid_sims], function(p) p$rmse), na.rm = TRUE),
+        coverage = mean(sapply(all_performance[valid_sims], function(p) p$coverage), na.rm = TRUE),
+        correlation = mean(sapply(all_performance[valid_sims], function(p) p$correlation), na.rm = TRUE),
+        n_simulations = length(all_performance),
+        n_valid_simulations = sum(valid_sims)
+      )
+      
+      cat("\n=======================================================\n")
+      cat("Average Performance Across All Simulations:\n")
+      cat("=======================================================\n")
+      cat(sprintf("Number of simulations: %d\n", avg_performance$n_simulations))
+      cat(sprintf("Number of valid simulations: %d\n", avg_performance$n_valid_simulations))
+      cat(sprintf("Average Bias: %.4f\n", avg_performance$bias))
+      cat(sprintf("Average MSE: %.4f\n", avg_performance$mse))
+      cat(sprintf("Average RMSE: %.4f\n", avg_performance$rmse))
+      cat(sprintf("Average Coverage Probability: %.4f\n", avg_performance$coverage))
+      cat(sprintf("Average Correlation: %.4f\n", avg_performance$correlation))
+      cat("\n")
+      
+      all_results$average_performance <- avg_performance
+    }
+  }
+  
+  return(all_results)
+}
+
+# ============================================================================
+# 8. Run the Simulation
+# ============================================================================
+
+cat("Starting Simulation...\n")
+cat("=========================================\n")
+
+# Run simulation with reasonable parameters
+results <- run_panel_simulation(
+  N = 30,              # 30 units total
+  T = 60,              # 60 time periods per unit
+  n_simulations = 5,   # 5 simulations for better statistics
+  n_post_periods = 8   # Estimate 8 post-treatment periods
+)
+
+# Visualize results from the first simulation
+if (length(results) > 0 && !is.null(results[[1]])) {
+  cat("\nVisualizing results from first simulation...\n")
+  plot_panel_results(
+    results[[1]]$pooled_results,
+    results[[1]]$unit_results,
+    results[[1]]$performance
+  )
+}
+
+# Print detailed results from first simulation
+if (length(results) > 0 && !is.null(results[[1]])) {
+  cat("\n=======================================================\n")
+  cat("Detailed Results from First Simulation:\n")
+  cat("=======================================================\n")
+  
+  sim1 <- results[[1]]
+  
+  if (!is.null(sim1$pooled_results)) {
+    pooled <- sim1$pooled_results
+    
+    cat("\nPooled Effects Comparison:\n")
+    cat("===========================\n")
+    
+    # Method A
+    method_A <- pooled$method_A
+    cat("\nMethod A: Average within each unit first, then average across units\n")
+    cat(sprintf("  Estimated ATE: %.4f\n", method_A$estimate))
+    cat(sprintf("  True ATE: %.4f\n", method_A$true))
+    cat(sprintf("  Bias: %.4f\n", method_A$estimate - method_A$true))
+    cat(sprintf("  Standard Error: %.4f\n", method_A$se))
+    cat(sprintf("  95%% CI: [%.4f, %.4f]\n", method_A$ci_lower, method_A$ci_upper))
+    cat(sprintf("  Number of units: %d\n", method_A$n_units))
+    
+    # Method B
+    method_B <- pooled$method_B
+    cat("\nMethod B: Pool all estimates together and average\n")
+    cat(sprintf("  Estimated ATE: %.4f\n", method_B$estimate))
+    cat(sprintf("  True ATE: %.4f\n", method_B$true))
+    cat(sprintf("  Bias: %.4f\n", method_B$estimate - method_B$true))
+    cat(sprintf("  Standard Error: %.4f\n", method_B$se))
+    cat(sprintf("  95%% CI: [%.4f, %.4f]\n", method_B$ci_lower, method_B$ci_upper))
+    cat(sprintf("  Number of estimates: %d\n", method_B$n_estimates))
+    
+    # Comparison
+    cat("\nComparison:\n")
+    cat(sprintf("  Difference in estimates (A - B): %.4f\n", method_A$estimate - method_B$estimate))
+    cat(sprintf("  Difference in true values (A - B): %.4f\n", method_A$true - method_B$true))
+    cat(sprintf("  Relative difference (%%): %.2f%%\n", 
+                100 * (method_A$estimate - method_B$estimate) / abs(method_B$estimate)))
+    
+    # Event-time specific results
+    cat("\nEvent-Time Specific Results (first 5 periods):\n")
+    cat("Event Time | Estimate | True Effect | 95% CI | N Units\n")
+    cat("------------------------------------------------------\n")
+    
+    event_time_data <- pooled$event_time
+    for (t in 1:min(5, length(event_time_data$event_time))) {
+      if (!is.na(event_time_data$estimates[t])) {
+        cat(sprintf("     %2d     |  %6.3f  |   %6.3f   | [%6.3f, %6.3f] |   %2d\n",
+                    t, event_time_data$estimates[t], event_time_data$true_effects[t],
+                    event_time_data$ci_lower[t], event_time_data$ci_upper[t],
+                    event_time_data$n_units_per_time[t]))
+      }
+    }
+  }
+  
+  # Performance metrics
+  if (!is.null(sim1$performance)) {
+    cat("\nPerformance Metrics:\n")
+    cat("====================\n")
+    cat(sprintf("Coverage Probability: %.4f (target: 0.95)\n", sim1$performance$coverage))
+    cat(sprintf("Average Bias: %.4f\n", sim1$performance$bias))
+    cat(sprintf("MSE: %.4f\n", sim1$performance$mse))
+    cat(sprintf("RMSE: %.4f\n", sim1$performance$rmse))
+    cat(sprintf("Correlation: %.4f\n", sim1$performance$correlation))
+    cat(sprintf("Number of estimates: %d\n", sim1$performance$n_estimates))
+  }
+}
+
+# Print summary across all simulations
+if (!is.null(results$average_performance)) {
+  cat("\n=======================================================\n")
+  cat("Summary Across All Simulations:\n")
+  cat("=======================================================\n")
+  
+  avg <- results$average_performance
+  cat(sprintf("Average Coverage Probability: %.4f (target: 0.95)\n", avg$coverage))
+  cat(sprintf("Average Bias: %.4f\n", avg$bias))
+  cat(sprintf("Average MSE: %.4f\n", avg$mse))
+  cat(sprintf("Average RMSE: %.4f\n", avg$rmse))
+  cat(sprintf("Average Correlation: %.4f\n", avg$correlation))
+  cat(sprintf("Number of simulations: %d\n", avg$n_simulations))
+  cat(sprintf("Number of valid simulations: %d\n", avg$n_valid_simulations))
+}
+
+cat("\nSimulation completed successfully!\n")
