@@ -1,0 +1,22 @@
+---
+title: "Introduction to endoLTE Package"
+author: "Hao Shiming"
+date: "2024-02-11"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Introduction to endoLTE Package}
+  %\VignetteEngine{knitr::rmarkdown}
+  \usepackage[utf8]{inputenc}
+---
+
+# Introduction to endoLTE Package
+
+## Overview
+
+The `endoLTE` (Endogenous Long-run Treatment Effects) package provides methods for estimating time-varying treatment effects in panel data with endogeneity and long-run dependence. It implements robust estimation techniques for heterogeneous treatment effects with staggered adoption designs.
+
+## Installation
+
+```{r, eval = FALSE}
+# Install from GitHub
+devtools::install_github("HaoShiming/endoLTE")
