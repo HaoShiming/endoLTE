@@ -9,10 +9,8 @@ This package is under active development...
 
 The current beta version can be installed from Github by:
 
+```r
 library(devtools)
 devtools::install_github("HaoShiming/endoLTE", INSTALL_opts=c("--no-multiarch"))
 library(endoLTE)
 
-```r
-# 这是一个R代码示例
-print("Hello, World!")
