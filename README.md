@@ -7,3 +7,8 @@ Shiming Hao (2026): "Estimating Heterogeneous Treatments Effects with Endogeneit
 
 This package is under active development...
 
+The current beta version can be installed from Github by:
+
+library(devtools)
+devtools::install_github("HaoShiming/endoLTE", INSTALL_opts=c("--no-multiarch"))
+library(endoLTE)
