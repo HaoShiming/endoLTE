@@ -26,41 +26,6 @@ library(endoLTE)
 
 # Example 1: Basic usage with example data
 # -----------------------------------------
-data(endoLTE_example)
-
-# View data structure
-str(endoLTE_example)
-summary(endoLTE_example)
-
-# Estimate treatment effects
-result1 <- estimate_panel_lte(
-  data = endoLTE_example,
-  unit_id = "unit_id",
-  time_var = "time",
-  outcome = "y",
-  treatment = "D",
-  covariates = "z",
-  confounders = "w",
-  true_effects = "tr",
-  n_post_periods = 8,
-  bootstrap_iter = 100,
-  seed = 123
-)
-
-# View results
-summary(result1)
-print(result1)
-
-# Create all visualizations
-plot_endoLTE(result1)
-
-# Individual plots
-plot_endoLTE(result1, type = "all_units")
-plot_endoLTE(result1, type = "comparison")
-plot_endoLTE(result1, type = "performance")
-
-# Example 2: Generate custom data
-# --------------------------------
 custom_data <- generate_endoLTE_data(
   N = 100,
   T = 80,
