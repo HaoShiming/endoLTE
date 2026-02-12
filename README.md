@@ -68,7 +68,7 @@ if (!is.null(result2$performance)) {
   cat(sprintf("Correlation: %.3f\n", result2$performance$correlation))
 }
 
-# Example 3: Using your own data
+# Example 2: Using your own data
 # -------------------------------
 # my_data <- read.csv("your_data.csv")
 # 
