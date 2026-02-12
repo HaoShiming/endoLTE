@@ -3,7 +3,7 @@ An R package for estimating time-varying treatment effects with endogeneity and 
 
 This package implements in R the social policy effects evaluation method by
 
-Shiming Hao (2026): "Estimating Heterogeneous Treatments Effects with Endogeneity and Long Range Dependency in Untreated Units Absent Time-Series Natural Experiments" (Revise & Resubmission)
+Shiming Hao (2026): "Estimating Heterogeneous Treatments Effects with Endogeneity and Long Range Dependency in Untreated Units Absent Time-Series Natural Experiments" (Revise & Resubmit)
 
 *This package is under active development...*
 
