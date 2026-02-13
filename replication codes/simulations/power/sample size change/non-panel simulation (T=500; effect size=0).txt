@@ -1,0 +1,2659 @@
+
+#univariate time series时变treatment effects model#
+
+
+fbm1d<-function (H,n,T,iseed) 
+{
+# fast one dimensional fractional Brownian motion (FBM) generator
+# output is 'W_t' with t in [0,T] using 'n' equally spaced grid points;
+# code uses Fast Fourier Transform (FFT) for speed.
+# INPUT:
+#          - Hurst parameter 'H' in [0,1]
+#          - number of grid points 'n', where 'n' is a power of 2;
+#            if the 'n' supplied is not a power of two,
+#            then we set n=2^ceil(log2(n)); default is n=2^12;
+#          - final time 'T'; default value is T=1;
+#          - iseed is the random seed number
+# OUTPUT:
+#          - Fractional Brownian motion 'W_t' for 't';
+#          - time 't' at which FBM is computed;
+#            If no output it invoked, then function plots the FBM.
+# Example: plot FBM with hurst parameter 0.95 on the interval [0,10]
+# [W,t]=fbm1d(0.95,2^12,10); plot(t,W)
+
+# Reference: 
+# Kroese, D. P., & Botev, Z. I. (2015). Spatial Process Simulation. 
+# In Stochastic Geometry, Spatial Statistics and Random Fields(pp. 369-404)
+# Springer International Publishing, DOI: 10.1007/978-3-319-10064-7_12
+set.seed(iseed)
+r=seq(n+1)
+r[1] = 1;
+idx=seq(n);
+r[-1] = 0.5*((idx+1)^(2*H) - 2*idx^(2*H) + (idx-1)^(2*H))
+r=append(r,r[seq(n,2, by = -1)])
+lambda=Re(fft(r))/(2*n)
+W=fft(sqrt(lambda)*complex(rnorm(2*n),rnorm(2*n)))
+W = n^(-H)*cumsum(Re(W[1:n+1]))
+W=T^H*W # t=(0:n)/n; #t=t*T;
+}
+
+
+
+
+a<-fbm1d(0.7,round(1.757812/(1/2^8)),1.953125,123)
+
+
+
+w<-function(){
+
+##time-varying treatment effects##
+
+
+T=500
+Q<-c(0.95,0.955,0.96,0.965,0.97)
+
+q<-rnorm(T,0,0.04)
+out<-ifelse((q)>=quantile((q),sample(Q,1)),1,0)
+qq<-sort(q)
+D<-sort(out)
+
+w<-sort(runif(T))+a
+
+z<-(runif(T,-0.01,0.01))+a        
+
+y_cf<-(w)
+
+e<-15.55*qq+rnorm(T,0,0.01)
+
+tr<-runif(T,0,0)
+
+y<-y_cf*11.25+0.1*z+tr*D+e
+
+
+y_co<-((y_cf)/1)*10.25+0.1*((z)/1)
+
+y_co<-y_co+runif(T,-1,1)
+
+
+
+#new method#
+
+T0<-sum(D==0)
+T1<-sum(D==0)+1
+
+
+t1<-sort(sample(300:800,500))
+t2<-t1^2
+
+i=1
+DD<-D[1:(T0+i)]
+yy<-y[1:(T0+i)]
+tt1<-t1[1:(T0+i)]
+tt2<-t2[1:(T0+i)]
+zz<-z[1:(T0+i)]
+
+
+a_x<-2*(lm(DD~tt2+tt1)$coefficients[2])               
+a_y<-2*(lm(yy~tt2+tt1)$coefficients[2])             
+                                                                            
+b_x<-lm(DD~tt2+tt1)$coefficients[3]  
+b_y<-lm(yy~tt2+tt1)$coefficients[3]
+
+A_x<-a_x
+B_x<-(-a_x)                                                        
+A_y<-a_y
+B_y<-(-a_y)
+
+x_t<-2*(a_x)*tt1+b_x
+Y_t<-(a_y*x_t+a_x*b_y-a_y*b_x)/a_x
+new<-mean(predict(lm(yy~Y_t))[T1:(T0+i)])-mean(predict(lm(yy~Y_t))[1:T0])                              #new_gammabeta#
+ols<-(lm(yy~DD+zz-1))$coefficients[1]
+#library(robcp)
+#structure<-teststat(y)                                  
+
+a1<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(DD[1:(T0+i)]*Y_t)-sum(DD[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a2<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(w[1:(T0+i)]*Y_t)-sum(w[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a3<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(z[1:(T0+i)]*Y_t)-sum(z[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a4<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(e[1:(T0+i)]*Y_t)-sum(e[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+
+
+new_treatment_1<-as.numeric( (new-coefficients(lm(yy~Y_t[1:(T0+i)]+z[1:(T0+i)]+DD[1:(T0+i)]))[2]*(mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))-a3*coefficients(lm(yy~Y_t[1:(T0+i)]+z[1:(T0+i)]+DD[1:(T0+i)]))[3])/a1 )
+
+
+new_treatment_1-tr[T1:500][1]
+
+
+
+
+
+
+i=2
+DD<-D[1:(T0+i)]-c(rep(0,T0),1,rep(0,1))
+yy<-y[1:(T0+i)]-c(rep(0,T0),new_treatment_1,rep(0,1))
+tt1<-t1[1:(T0+i)]
+tt2<-t2[1:(T0+i)]
+zz<-z[1:(T0+i)]
+
+
+a_x<-2*(lm(DD~tt2+tt1)$coefficients[2])               
+a_y<-2*(lm(yy~tt2+tt1)$coefficients[2])             # 10.25* sum( (2*tt1*a_y+b_y)*w[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )  + 0.1* sum( (2*tt1*a_y+b_y)*z[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   ) 
+                                                                            
+b_x<-lm(DD~tt2+tt1)$coefficients[3]                # sum( (2*tt1*a_y+b_y)*x[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )
+b_y<-lm(yy~tt2+tt1)$coefficients[3]
+
+A_x<-a_x
+B_x<-(-a_x)                                                        
+A_y<-a_y
+B_y<-(-a_y)
+
+x_t<-2*(a_x)*tt1+b_x
+Y_t<-(a_y*x_t+a_x*b_y-a_y*b_x)/a_x
+new<-mean(predict(lm(yy~Y_t))[T1:(T0+i)])-mean(predict(lm(yy~Y_t))[1:T0])                              #new_gammabeta#
+ols<-(lm(yy~DD+zz-1))$coefficients[1]
+#library(robcp)
+#structure<-teststat(y)                                  
+
+a1<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(DD[1:(T0+i)]*Y_t)-sum(DD[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a2<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(w[1:(T0+i)]*Y_t)-sum(w[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a3<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(z[1:(T0+i)]*Y_t)-sum(z[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a4<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(e[1:(T0+i)]*Y_t)-sum(e[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+
+
+new_treatment_2<-as.numeric( (new-coefficients(lm(yy~Y_t[1:(T0+i)]+z[1:(T0+i)]+DD[1:(T0+i)]))[2]*(mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))-a3*coefficients(lm(yy~Y_t[1:(T0+i)]+z[1:(T0+i)]+DD[1:(T0+i)]))[3])/a1 )
+
+new_treatment_2-tr[T1:500][2]
+
+
+
+i=3
+DD<-D[1:(T0+i)]-c(rep(0,T0),1,1,rep(0,1))
+yy<-y[1:(T0+i)]-c(rep(0,T0),new_treatment_1,new_treatment_2,rep(0,1))
+tt1<-t1[1:(T0+i)]
+tt2<-t2[1:(T0+i)]
+zz<-z[1:(T0+i)]
+
+
+a_x<-2*(lm(DD~tt2+tt1)$coefficients[2])               
+a_y<-2*(lm(yy~tt2+tt1)$coefficients[2])             # 10.25* sum( (2*tt1*a_y+b_y)*w[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )  + 0.1* sum( (2*tt1*a_y+b_y)*z[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   ) 
+                                                                            
+b_x<-lm(DD~tt2+tt1)$coefficients[3]                # sum( (2*tt1*a_y+b_y)*x[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )
+b_y<-lm(yy~tt2+tt1)$coefficients[3]
+
+A_x<-a_x
+B_x<-(-a_x)                                                        
+A_y<-a_y
+B_y<-(-a_y)
+
+x_t<-2*(a_x)*tt1+b_x
+Y_t<-(a_y*x_t+a_x*b_y-a_y*b_x)/a_x
+new<-mean(predict(lm(yy~Y_t))[T1:(T0+i)])-mean(predict(lm(yy~Y_t))[1:T0])                              #new_gammabeta#
+ols<-(lm(yy~DD+zz-1))$coefficients[1]
+#library(robcp)
+#structure<-teststat(y)                                  
+
+a1<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(DD[1:(T0+i)]*Y_t)-sum(DD[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a2<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(w[1:(T0+i)]*Y_t)-sum(w[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a3<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(z[1:(T0+i)]*Y_t)-sum(z[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a4<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(e[1:(T0+i)]*Y_t)-sum(e[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+
+
+new_treatment_3<-as.numeric( (new-coefficients(lm(yy~Y_t[1:(T0+i)]+z[1:(T0+i)]+DD[1:(T0+i)]))[2]*(mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))-a3*coefficients(lm(yy~Y_t[1:(T0+i)]+z[1:(T0+i)]+DD[1:(T0+i)]))[3])/a1 )
+
+
+new_treatment_3-tr[T1:500][3]
+
+
+
+
+i=4
+DD<-D[1:(T0+i)]-c(rep(0,T0),1,1,1,rep(0,1))
+yy<-y[1:(T0+i)]-c(rep(0,T0),new_treatment_1,new_treatment_2,new_treatment_3,rep(0,1))
+tt1<-t1[1:(T0+i)]
+tt2<-t2[1:(T0+i)]
+zz<-z[1:(T0+i)]
+
+
+a_x<-2*(lm(DD~tt2+tt1)$coefficients[2])               
+a_y<-2*(lm(yy~tt2+tt1)$coefficients[2])             # 10.25* sum( (2*tt1*a_y+b_y)*w[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )  + 0.1* sum( (2*tt1*a_y+b_y)*z[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   ) 
+                                                                            
+b_x<-lm(DD~tt2+tt1)$coefficients[3]                # sum( (2*tt1*a_y+b_y)*x[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )
+b_y<-lm(yy~tt2+tt1)$coefficients[3]
+
+A_x<-a_x
+B_x<-(-a_x)                                                        
+A_y<-a_y
+B_y<-(-a_y)
+
+x_t<-2*(a_x)*tt1+b_x
+Y_t<-(a_y*x_t+a_x*b_y-a_y*b_x)/a_x
+new<-mean(predict(lm(yy~Y_t))[T1:(T0+i)])-mean(predict(lm(yy~Y_t))[1:T0])                              #new_gammabeta#
+ols<-(lm(yy~DD+zz-1))$coefficients[1]
+#library(robcp)
+#structure<-teststat(y)                                  
+
+a1<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(DD[1:(T0+i)]*Y_t)-sum(DD[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a2<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(w[1:(T0+i)]*Y_t)-sum(w[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a3<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(z[1:(T0+i)]*Y_t)-sum(z[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a4<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(e[1:(T0+i)]*Y_t)-sum(e[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+
+
+new_treatment_4<-as.numeric( (new-coefficients(lm(yy~Y_t[1:(T0+i)]+z[1:(T0+i)]+DD[1:(T0+i)]))[2]*(mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))-a3*coefficients(lm(yy~Y_t[1:(T0+i)]+z[1:(T0+i)]+DD[1:(T0+i)]))[3])/a1 )
+
+
+new_treatment_4-tr[T1:500][4]
+
+
+
+
+i=5
+DD<-D[1:(T0+i)]-c(rep(0,T0),1,1,1,1,rep(0,1))
+yy<-y[1:(T0+i)]-c(rep(0,T0),new_treatment_1,new_treatment_2,new_treatment_3,new_treatment_4,rep(0,1))
+tt1<-t1[1:(T0+i)]
+tt2<-t2[1:(T0+i)]
+zz<-z[1:(T0+i)]
+
+
+a_x<-2*(lm(DD~tt2+tt1)$coefficients[2])               
+a_y<-2*(lm(yy~tt2+tt1)$coefficients[2])             # 10.25* sum( (2*tt1*a_y+b_y)*w[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )  + 0.1* sum( (2*tt1*a_y+b_y)*z[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   ) 
+                                                                            
+b_x<-lm(DD~tt2+tt1)$coefficients[3]                # sum( (2*tt1*a_y+b_y)*x[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )
+b_y<-lm(yy~tt2+tt1)$coefficients[3]
+
+A_x<-a_x
+B_x<-(-a_x)                                                        
+A_y<-a_y
+B_y<-(-a_y)
+
+x_t<-2*(a_x)*tt1+b_x
+Y_t<-(a_y*x_t+a_x*b_y-a_y*b_x)/a_x
+new<-mean(predict(lm(yy~Y_t))[T1:(T0+i)])-mean(predict(lm(yy~Y_t))[1:T0])                              #new_gammabeta#
+ols<-(lm(yy~DD+zz-1))$coefficients[1]
+#library(robcp)
+#structure<-teststat(y)                                  
+
+a1<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(DD[1:(T0+i)]*Y_t)-sum(DD[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a2<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(w[1:(T0+i)]*Y_t)-sum(w[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a3<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(z[1:(T0+i)]*Y_t)-sum(z[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a4<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(e[1:(T0+i)]*Y_t)-sum(e[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+
+
+new_treatment_5<-as.numeric( (new-coefficients(lm(yy~Y_t[1:(T0+i)]+z[1:(T0+i)]+DD[1:(T0+i)]))[2]*(mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))-a3*coefficients(lm(yy~Y_t[1:(T0+i)]+z[1:(T0+i)]+DD[1:(T0+i)]))[3])/a1 )
+
+
+new_treatment_5-tr[T1:500][5]
+
+
+
+
+i=6
+DD<-D[1:(T0+i)]-c(rep(0,T0),1,1,1,1,1,rep(0,1))
+yy<-y[1:(T0+i)]-c(rep(0,T0),new_treatment_1,new_treatment_2,new_treatment_3,new_treatment_4,new_treatment_5,rep(0,1))
+tt1<-t1[1:(T0+i)]
+tt2<-t2[1:(T0+i)]
+zz<-z[1:(T0+i)]
+
+
+a_x<-2*(lm(DD~tt2+tt1)$coefficients[2])               
+a_y<-2*(lm(yy~tt2+tt1)$coefficients[2])             # 10.25* sum( (2*tt1*a_y+b_y)*w[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )  + 0.1* sum( (2*tt1*a_y+b_y)*z[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   ) 
+                                                                            
+b_x<-lm(DD~tt2+tt1)$coefficients[3]                # sum( (2*tt1*a_y+b_y)*x[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )
+b_y<-lm(yy~tt2+tt1)$coefficients[3]
+
+A_x<-a_x
+B_x<-(-a_x)                                                        
+A_y<-a_y
+B_y<-(-a_y)
+
+x_t<-2*(a_x)*tt1+b_x
+Y_t<-(a_y*x_t+a_x*b_y-a_y*b_x)/a_x
+new<-mean(predict(lm(yy~Y_t))[T1:(T0+i)])-mean(predict(lm(yy~Y_t))[1:T0])                              #new_gammabeta#
+ols<-(lm(yy~DD+zz-1))$coefficients[1]
+#library(robcp)
+#structure<-teststat(y)                                  
+
+a1<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(DD[1:(T0+i)]*Y_t)-sum(DD[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a2<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(w[1:(T0+i)]*Y_t)-sum(w[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a3<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(z[1:(T0+i)]*Y_t)-sum(z[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a4<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(e[1:(T0+i)]*Y_t)-sum(e[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+
+
+new_treatment_6<-as.numeric( (new-coefficients(lm(yy~Y_t[1:(T0+i)]+z[1:(T0+i)]+DD[1:(T0+i)]))[2]*(mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))-a3*coefficients(lm(yy~Y_t[1:(T0+i)]+z[1:(T0+i)]+DD[1:(T0+i)]))[3])/a1 )
+
+
+new_treatment_6-tr[T1:500][6]
+
+
+
+
+
+i=7
+DD<-D[1:(T0+i)]-c(rep(0,T0),1,1,1,1,1,1,rep(0,1))
+yy<-y[1:(T0+i)]-c(rep(0,T0),new_treatment_1,new_treatment_2,new_treatment_3,new_treatment_4,new_treatment_5,new_treatment_6,rep(0,1))
+tt1<-t1[1:(T0+i)]
+tt2<-t2[1:(T0+i)]
+zz<-z[1:(T0+i)]
+
+
+a_x<-2*(lm(DD~tt2+tt1)$coefficients[2])               
+a_y<-2*(lm(yy~tt2+tt1)$coefficients[2])             # 10.25* sum( (2*tt1*a_y+b_y)*w[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )  + 0.1* sum( (2*tt1*a_y+b_y)*z[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   ) 
+                                                                            
+b_x<-lm(DD~tt2+tt1)$coefficients[3]                # sum( (2*tt1*a_y+b_y)*x[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )
+b_y<-lm(yy~tt2+tt1)$coefficients[3]
+
+A_x<-a_x
+B_x<-(-a_x)                                                        
+A_y<-a_y
+B_y<-(-a_y)
+
+x_t<-2*(a_x)*tt1+b_x
+Y_t<-(a_y*x_t+a_x*b_y-a_y*b_x)/a_x
+new<-mean(predict(lm(yy~Y_t))[T1:(T0+i)])-mean(predict(lm(yy~Y_t))[1:T0])                              #new_gammabeta#
+ols<-(lm(yy~DD+zz-1))$coefficients[1]
+#library(robcp)
+#structure<-teststat(y)                                  
+
+a1<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(DD[1:(T0+i)]*Y_t)-sum(DD[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a2<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(w[1:(T0+i)]*Y_t)-sum(w[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a3<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(z[1:(T0+i)]*Y_t)-sum(z[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a4<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(e[1:(T0+i)]*Y_t)-sum(e[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+
+
+new_treatment_7<-as.numeric( (new-coefficients(lm(yy~Y_t[1:(T0+i)]+z[1:(T0+i)]+DD[1:(T0+i)]))[2]*(mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))-a3*coefficients(lm(yy~Y_t[1:(T0+i)]+z[1:(T0+i)]+DD[1:(T0+i)]))[3])/a1 )
+
+
+new_treatment_7-tr[T1:500][7]
+
+
+
+
+i=8
+DD<-D[1:(T0+i)]-c(rep(0,T0),1,1,1,1,1,1,1,rep(0,1))
+yy<-y[1:(T0+i)]-c(rep(0,T0),new_treatment_1,new_treatment_2,new_treatment_3,new_treatment_4,new_treatment_5,new_treatment_6,new_treatment_7,rep(0,1))
+tt1<-t1[1:(T0+i)]
+tt2<-t2[1:(T0+i)]
+zz<-z[1:(T0+i)]
+
+
+a_x<-2*(lm(DD~tt2+tt1)$coefficients[2])               
+a_y<-2*(lm(yy~tt2+tt1)$coefficients[2])             # 10.25* sum( (2*tt1*a_y+b_y)*w[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )  + 0.1* sum( (2*tt1*a_y+b_y)*z[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   ) 
+                                                                            
+b_x<-lm(DD~tt2+tt1)$coefficients[3]                # sum( (2*tt1*a_y+b_y)*x[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )
+b_y<-lm(yy~tt2+tt1)$coefficients[3]
+
+A_x<-a_x
+B_x<-(-a_x)                                                        
+A_y<-a_y
+B_y<-(-a_y)
+
+x_t<-2*(a_x)*tt1+b_x
+Y_t<-(a_y*x_t+a_x*b_y-a_y*b_x)/a_x
+new<-mean(predict(lm(yy~Y_t))[T1:(T0+i)])-mean(predict(lm(yy~Y_t))[1:T0])                              #new_gammabeta#
+ols<-(lm(yy~DD+zz-1))$coefficients[1]
+#library(robcp)
+#structure<-teststat(y)                                  
+
+a1<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(DD[1:(T0+i)]*Y_t)-sum(DD[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a2<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(w[1:(T0+i)]*Y_t)-sum(w[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a3<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(z[1:(T0+i)]*Y_t)-sum(z[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a4<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(e[1:(T0+i)]*Y_t)-sum(e[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+
+
+new_treatment_8<-as.numeric( (new-coefficients(lm(yy~Y_t[1:(T0+i)]+z[1:(T0+i)]+DD[1:(T0+i)]))[2]*(mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))-a3*coefficients(lm(yy~Y_t[1:(T0+i)]+z[1:(T0+i)]+DD[1:(T0+i)]))[3])/a1 )
+
+
+new_treatment_8-tr[T1:500][8]
+
+
+
+
+
+
+i=9
+DD<-D[1:(T0+i)]-c(rep(0,T0),1,1,1,1,1,1,1,1,rep(0,1))
+yy<-y[1:(T0+i)]-c(rep(0,T0),new_treatment_1,new_treatment_2,new_treatment_3,new_treatment_4,new_treatment_5,new_treatment_6,new_treatment_7,new_treatment_8,rep(0,1))
+tt1<-t1[1:(T0+i)]
+tt2<-t2[1:(T0+i)]
+zz<-z[1:(T0+i)]
+
+
+a_x<-2*(lm(DD~tt2+tt1)$coefficients[2])               
+a_y<-2*(lm(yy~tt2+tt1)$coefficients[2])             # 10.25* sum( (2*tt1*a_y+b_y)*w[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )  + 0.1* sum( (2*tt1*a_y+b_y)*z[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   ) 
+                                                                            
+b_x<-lm(DD~tt2+tt1)$coefficients[3]                # sum( (2*tt1*a_y+b_y)*x[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )
+b_y<-lm(yy~tt2+tt1)$coefficients[3]
+
+A_x<-a_x
+B_x<-(-a_x)                                                        
+A_y<-a_y
+B_y<-(-a_y)
+
+x_t<-2*(a_x)*tt1+b_x
+Y_t<-(a_y*x_t+a_x*b_y-a_y*b_x)/a_x
+new<-mean(predict(lm(yy~Y_t))[T1:(T0+i)])-mean(predict(lm(yy~Y_t))[1:T0])                              #new_gammabeta#
+ols<-(lm(yy~DD+zz-1))$coefficients[1]
+#library(robcp)
+#structure<-teststat(y)                                  
+
+a1<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(DD[1:(T0+i)]*Y_t)-sum(DD[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a2<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(w[1:(T0+i)]*Y_t)-sum(w[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a3<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(z[1:(T0+i)]*Y_t)-sum(z[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a4<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(e[1:(T0+i)]*Y_t)-sum(e[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+
+
+new_treatment_9<-as.numeric( (new-coefficients(lm(yy~Y_t[1:(T0+i)]+z[1:(T0+i)]+DD[1:(T0+i)]))[2]*(mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))-a3*coefficients(lm(yy~Y_t[1:(T0+i)]+z[1:(T0+i)]+DD[1:(T0+i)]))[3])/a1 )
+
+
+new_treatment_9-tr[T1:500][9]
+
+
+
+i=10
+DD<-D[1:(T0+i)]-c(rep(0,T0),1,1,1,1,1,1,1,1,1,rep(0,1))
+yy<-y[1:(T0+i)]-c(rep(0,T0),new_treatment_1,new_treatment_2,new_treatment_3,new_treatment_4,new_treatment_5,new_treatment_6,new_treatment_7,
+new_treatment_8,new_treatment_9,rep(0,1))
+tt1<-t1[1:(T0+i)]
+tt2<-t2[1:(T0+i)]
+zz<-z[1:(T0+i)]
+
+
+a_x<-2*(lm(DD~tt2+tt1)$coefficients[2])               
+a_y<-2*(lm(yy~tt2+tt1)$coefficients[2])             # 10.25* sum( (2*tt1*a_y+b_y)*w[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )  + 0.1* sum( (2*tt1*a_y+b_y)*z[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   ) 
+                                                                            
+b_x<-lm(DD~tt2+tt1)$coefficients[3]                # sum( (2*tt1*a_y+b_y)*x[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )
+b_y<-lm(yy~tt2+tt1)$coefficients[3]
+
+A_x<-a_x
+B_x<-(-a_x)                                                        
+A_y<-a_y
+B_y<-(-a_y)
+
+x_t<-2*(a_x)*tt1+b_x
+Y_t<-(a_y*x_t+a_x*b_y-a_y*b_x)/a_x
+new<-mean(predict(lm(yy~Y_t))[T1:(T0+i)])-mean(predict(lm(yy~Y_t))[1:T0])                              #new_gammabeta#
+ols<-(lm(yy~DD+zz-1))$coefficients[1]
+#library(robcp)
+#structure<-teststat(y)                                  
+
+a1<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(DD[1:(T0+i)]*Y_t)-sum(DD[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a2<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(w[1:(T0+i)]*Y_t)-sum(w[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a3<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(z[1:(T0+i)]*Y_t)-sum(z[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a4<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(e[1:(T0+i)]*Y_t)-sum(e[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+
+
+new_treatment_10<-as.numeric( (new-coefficients(lm(yy~Y_t[1:(T0+i)]+z[1:(T0+i)]+DD[1:(T0+i)]))[2]*(mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))-a3*coefficients(lm(yy~Y_t[1:(T0+i)]+z[1:(T0+i)]+DD[1:(T0+i)]))[3])/a1 )
+
+
+new_treatment_10-tr[T1:500][10]
+
+
+
+
+i=11
+DD<-D[1:(T0+i)]-c(rep(0,T0),1,1,1,1,1,1,1,1,1,1,rep(0,1))
+yy<-y[1:(T0+i)]-c(rep(0,T0),new_treatment_1,new_treatment_2,new_treatment_3,new_treatment_4,new_treatment_5,new_treatment_6,new_treatment_7,
+new_treatment_8,new_treatment_9,new_treatment_10,rep(0,1))
+tt1<-t1[1:(T0+i)]
+tt2<-t2[1:(T0+i)]
+zz<-z[1:(T0+i)]
+
+
+a_x<-2*(lm(DD~tt2+tt1)$coefficients[2])               
+a_y<-2*(lm(yy~tt2+tt1)$coefficients[2])             # 10.25* sum( (2*tt1*a_y+b_y)*w[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )  + 0.1* sum( (2*tt1*a_y+b_y)*z[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   ) 
+                                                                            
+b_x<-lm(DD~tt2+tt1)$coefficients[3]                # sum( (2*tt1*a_y+b_y)*x[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )
+b_y<-lm(yy~tt2+tt1)$coefficients[3]
+
+A_x<-a_x
+B_x<-(-a_x)                                                        
+A_y<-a_y
+B_y<-(-a_y)
+
+x_t<-2*(a_x)*tt1+b_x
+Y_t<-(a_y*x_t+a_x*b_y-a_y*b_x)/a_x
+new<-mean(predict(lm(yy~Y_t))[T1:(T0+i)])-mean(predict(lm(yy~Y_t))[1:T0])                              #new_gammabeta#
+ols<-(lm(yy~DD+zz-1))$coefficients[1]
+#library(robcp)
+#structure<-teststat(y)                                  
+
+a1<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(DD[1:(T0+i)]*Y_t)-sum(DD[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a2<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(w[1:(T0+i)]*Y_t)-sum(w[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a3<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(z[1:(T0+i)]*Y_t)-sum(z[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a4<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(e[1:(T0+i)]*Y_t)-sum(e[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+
+
+new_treatment_11<-as.numeric( (new-coefficients(lm(yy~Y_t[1:(T0+i)]+z[1:(T0+i)]+DD[1:(T0+i)]))[2]*(mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))-a3*coefficients(lm(yy~Y_t[1:(T0+i)]+z[1:(T0+i)]+DD[1:(T0+i)]))[3])/a1 )
+
+
+new_treatment_11-tr[T1:500][11]
+
+
+
+
+
+i=12
+DD<-D[1:(T0+i)]-c(rep(0,T0),1,1,1,1,1,1,1,1,1,1,1,rep(0,1))
+yy<-y[1:(T0+i)]-c(rep(0,T0),new_treatment_1,new_treatment_2,new_treatment_3,new_treatment_4,new_treatment_5,new_treatment_6,new_treatment_7,
+new_treatment_8,new_treatment_9,new_treatment_10,new_treatment_11,rep(0,1))
+tt1<-t1[1:(T0+i)]
+tt2<-t2[1:(T0+i)]
+zz<-z[1:(T0+i)]
+
+
+a_x<-2*(lm(DD~tt2+tt1)$coefficients[2])               
+a_y<-2*(lm(yy~tt2+tt1)$coefficients[2])             # 10.25* sum( (2*tt1*a_y+b_y)*w[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )  + 0.1* sum( (2*tt1*a_y+b_y)*z[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   ) 
+                                                                            
+b_x<-lm(DD~tt2+tt1)$coefficients[3]                # sum( (2*tt1*a_y+b_y)*x[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )
+b_y<-lm(yy~tt2+tt1)$coefficients[3]
+
+A_x<-a_x
+B_x<-(-a_x)                                                        
+A_y<-a_y
+B_y<-(-a_y)
+
+x_t<-2*(a_x)*tt1+b_x
+Y_t<-(a_y*x_t+a_x*b_y-a_y*b_x)/a_x
+new<-mean(predict(lm(yy~Y_t))[T1:(T0+i)])-mean(predict(lm(yy~Y_t))[1:T0])                              #new_gammabeta#
+ols<-(lm(yy~DD+zz-1))$coefficients[1]
+#library(robcp)
+#structure<-teststat(y)                                  
+
+a1<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(DD[1:(T0+i)]*Y_t)-sum(DD[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a2<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(w[1:(T0+i)]*Y_t)-sum(w[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a3<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(z[1:(T0+i)]*Y_t)-sum(z[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a4<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(e[1:(T0+i)]*Y_t)-sum(e[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+
+
+new_treatment_12<-as.numeric( (new-coefficients(lm(yy~Y_t[1:(T0+i)]+z[1:(T0+i)]+DD[1:(T0+i)]))[2]*(mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))-a3*coefficients(lm(yy~Y_t[1:(T0+i)]+z[1:(T0+i)]+DD[1:(T0+i)]))[3])/a1 )
+
+
+new_treatment_12-tr[T1:500][12]
+
+
+
+
+
+i=13
+DD<-D[1:(T0+i)]-c(rep(0,T0),1,1,1,1,1,1,1,1,1,1,1,1,rep(0,1))
+yy<-y[1:(T0+i)]-c(rep(0,T0),new_treatment_1,new_treatment_2,new_treatment_3,new_treatment_4,new_treatment_5,new_treatment_6,new_treatment_7,
+new_treatment_8,new_treatment_9,new_treatment_10,new_treatment_11,new_treatment_12,rep(0,1))
+tt1<-t1[1:(T0+i)]
+tt2<-t2[1:(T0+i)]
+zz<-z[1:(T0+i)]
+
+
+a_x<-2*(lm(DD~tt2+tt1)$coefficients[2])               
+a_y<-2*(lm(yy~tt2+tt1)$coefficients[2])             # 10.25* sum( (2*tt1*a_y+b_y)*w[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )  + 0.1* sum( (2*tt1*a_y+b_y)*z[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   ) 
+                                                                            
+b_x<-lm(DD~tt2+tt1)$coefficients[3]                # sum( (2*tt1*a_y+b_y)*x[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )
+b_y<-lm(yy~tt2+tt1)$coefficients[3]
+
+A_x<-a_x
+B_x<-(-a_x)                                                        
+A_y<-a_y
+B_y<-(-a_y)
+
+x_t<-2*(a_x)*tt1+b_x
+Y_t<-(a_y*x_t+a_x*b_y-a_y*b_x)/a_x
+new<-mean(predict(lm(yy~Y_t))[T1:(T0+i)])-mean(predict(lm(yy~Y_t))[1:T0])                              #new_gammabeta#
+ols<-(lm(yy~DD+zz-1))$coefficients[1]
+#library(robcp)
+#structure<-teststat(y)                                  
+
+a1<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(DD[1:(T0+i)]*Y_t)-sum(DD[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a2<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(w[1:(T0+i)]*Y_t)-sum(w[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a3<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(z[1:(T0+i)]*Y_t)-sum(z[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a4<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(e[1:(T0+i)]*Y_t)-sum(e[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+
+
+new_treatment_13<-as.numeric( (new-coefficients(lm(yy~Y_t[1:(T0+i)]+z[1:(T0+i)]+DD[1:(T0+i)]))[2]*(mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))-a3*coefficients(lm(yy~Y_t[1:(T0+i)]+z[1:(T0+i)]+DD[1:(T0+i)]))[3])/a1 )
+
+
+new_treatment_13-tr[T1:500][13]
+
+
+
+
+i=14
+DD<-D[1:(T0+i)]-c(rep(0,T0),1,1,1,1,1,1,1,1,1,1,1,1,1,rep(0,1))
+yy<-y[1:(T0+i)]-c(rep(0,T0),new_treatment_1,new_treatment_2,new_treatment_3,new_treatment_4,new_treatment_5,new_treatment_6,new_treatment_7,
+new_treatment_8,new_treatment_9,new_treatment_10,new_treatment_11,new_treatment_12,new_treatment_13,rep(0,1))
+tt1<-t1[1:(T0+i)]
+tt2<-t2[1:(T0+i)]
+zz<-z[1:(T0+i)]
+
+
+a_x<-2*(lm(DD~tt2+tt1)$coefficients[2])               
+a_y<-2*(lm(yy~tt2+tt1)$coefficients[2])             # 10.25* sum( (2*tt1*a_y+b_y)*w[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )  + 0.1* sum( (2*tt1*a_y+b_y)*z[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   ) 
+                                                                            
+b_x<-lm(DD~tt2+tt1)$coefficients[3]                # sum( (2*tt1*a_y+b_y)*x[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )
+b_y<-lm(yy~tt2+tt1)$coefficients[3]
+
+A_x<-a_x
+B_x<-(-a_x)                                                        
+A_y<-a_y
+B_y<-(-a_y)
+
+x_t<-2*(a_x)*tt1+b_x
+Y_t<-(a_y*x_t+a_x*b_y-a_y*b_x)/a_x
+new<-mean(predict(lm(yy~Y_t))[T1:(T0+i)])-mean(predict(lm(yy~Y_t))[1:T0])                              #new_gammabeta#
+ols<-(lm(yy~DD+zz-1))$coefficients[1]
+#library(robcp)
+#structure<-teststat(y)                                  
+
+a1<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(DD[1:(T0+i)]*Y_t)-sum(DD[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a2<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(w[1:(T0+i)]*Y_t)-sum(w[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a3<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(z[1:(T0+i)]*Y_t)-sum(z[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a4<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(e[1:(T0+i)]*Y_t)-sum(e[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+
+
+new_treatment_14<-as.numeric( (new-coefficients(lm(yy~Y_t[1:(T0+i)]+z[1:(T0+i)]+DD[1:(T0+i)]))[2]*(mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))-a3*coefficients(lm(yy~Y_t[1:(T0+i)]+z[1:(T0+i)]+DD[1:(T0+i)]))[3])/a1 )
+
+
+new_treatment_14-tr[T1:500][14]
+
+
+
+
+i=15
+DD<-D[1:(T0+i)]-c(rep(0,T0),1,1,1,1,1,1,1,1,1,1,1,1,1,1,rep(0,1))
+yy<-y[1:(T0+i)]-c(rep(0,T0),new_treatment_1,new_treatment_2,new_treatment_3,new_treatment_4,new_treatment_5,new_treatment_6,new_treatment_7,
+new_treatment_8,new_treatment_9,new_treatment_10,new_treatment_11,new_treatment_12,new_treatment_13,new_treatment_14,rep(0,1))
+tt1<-t1[1:(T0+i)]
+tt2<-t2[1:(T0+i)]
+zz<-z[1:(T0+i)]
+
+
+a_x<-2*(lm(DD~tt2+tt1)$coefficients[2])               
+a_y<-2*(lm(yy~tt2+tt1)$coefficients[2])             # 10.25* sum( (2*tt1*a_y+b_y)*w[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )  + 0.1* sum( (2*tt1*a_y+b_y)*z[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   ) 
+                                                                            
+b_x<-lm(DD~tt2+tt1)$coefficients[3]                # sum( (2*tt1*a_y+b_y)*x[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )
+b_y<-lm(yy~tt2+tt1)$coefficients[3]
+
+A_x<-a_x
+B_x<-(-a_x)                                                        
+A_y<-a_y
+B_y<-(-a_y)
+
+x_t<-2*(a_x)*tt1+b_x
+Y_t<-(a_y*x_t+a_x*b_y-a_y*b_x)/a_x
+new<-mean(predict(lm(yy~Y_t))[T1:(T0+i)])-mean(predict(lm(yy~Y_t))[1:T0])                              #new_gammabeta#
+ols<-(lm(yy~DD+zz-1))$coefficients[1]
+#library(robcp)
+#structure<-teststat(y)                                  
+
+a1<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(DD[1:(T0+i)]*Y_t)-sum(DD[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a2<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(w[1:(T0+i)]*Y_t)-sum(w[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a3<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(z[1:(T0+i)]*Y_t)-sum(z[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a4<-  (mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))* (( (T0+i)*sum(e[1:(T0+i)]*Y_t)-sum(e[1:(T0+i)])*sum(Y_t) )/( (T0+i)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+
+
+new_treatment_15<-as.numeric( (new-coefficients(lm(yy~Y_t[1:(T0+i)]+z[1:(T0+i)]+DD[1:(T0+i)]))[2]*(mean(Y_t[T1:(T0+i)])-mean(Y_t[1:T0]))-a3*coefficients(lm(yy~Y_t[1:(T0+i)]+z[1:(T0+i)]+DD[1:(T0+i)]))[3])/a1 )
+
+
+new_treatment_15-tr[T1:500][15]
+
+
+
+
+new_treatment<-c(new_treatment_1,new_treatment_2,new_treatment_3,new_treatment_4,new_treatment_5,new_treatment_6,new_treatment_7,
+                               new_treatment_8,new_treatment_9,new_treatment_10,new_treatment_11,new_treatment_12,new_treatment_13,new_treatment_14, new_treatment_15)
+
+
+min<-min(new_treatment,tr[T1:500][1:15])
+max<-max(new_treatment,tr[T1:500][1:15])
+plot(tr[T1:500][1:15],ylim=c(min,max),pch="")
+lines(tr[T1:500][1:15],lwd=2)
+par(new=T)
+plot(new_treatment,ylim=c(min,max),col="2",pch="")
+lines(new_treatment,lwd=2,col="2",lty=3)
+
+
+
+
+
+####################################################################################################################
+####################################################################################################################
+
+
+
+
+##bootstrap
+
+
+
+#求sd#
+
+bootstrap_new_treatment_1<-c()
+for (j in 1:100){
+
+T0<-sum(D==0)
+T1<-sum(D==0)+1
+
+t0<-sample((T0-15):(T0-10),1)
+
+t1<-sort(sample(300:800,500))
+t2<-t1^2
+
+i=1
+DD<-D[t0:(T0+i)]
+yy<-y[t0:(T0+i)]
+tt1<-t1[t0:(T0+i)]
+tt2<-t2[t0:(T0+i)]
+zz<-z[t0:(T0+i)]
+
+
+a_x<-2*(lm(DD~tt2+tt1)$coefficients[2])               
+a_y<-2*(lm(yy~tt2+tt1)$coefficients[2])             
+                                                                            
+b_x<-lm(DD~tt2+tt1)$coefficients[3]                
+b_y<-lm(yy~tt2+tt1)$coefficients[3]
+
+A_x<-a_x
+B_x<-(-a_x)                                                        
+A_y<-a_y
+B_y<-(-a_y)
+
+x_t<-2*(a_x)*tt1+b_x
+Y_t<-(a_y*x_t+a_x*b_y-a_y*b_x)/a_x
+new<-mean(predict(lm(yy~Y_t))[(T0-t0+2):(T0+i-t0+1)])-mean(predict(lm(yy~Y_t))[1:(T0-t0+1)])                              #new_gammabeta#
+ols<-(lm(yy~DD+zz-1))$coefficients[1]
+#library(robcp)
+#structure<-teststat(y)                                  
+
+a1<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(DD[1:(T0+i-t0+1)]*Y_t)-sum(DD[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a2<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(w[1:(T0+i-t0+1)]*Y_t)-sum(w[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a3<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(z[1:(T0+i-t0+1)]*Y_t)-sum(z[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a4<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(e[1:(T0+i-t0+1)]*Y_t)-sum(e[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+
+
+bootstrap_new_treatment_1[j]<-as.numeric( (new-coefficients(lm(yy~Y_t+z[t0:T1]+DD))[2]*(mean(Y_t[(T0-t0+1):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0)]))-a3*coefficients(lm(yy~Y_t+z[t0:T1]+DD))[3])/a1 )
+
+}
+
+
+B<-length(bootstrap_new_treatment_1)
+q=1
+x=sort(as.numeric(bootstrap_new_treatment_1))
+nob=length(x)-1 
+sum1 = sum((x[5:(nob+1)]-2*x[3:(nob-1)]+x[1:(nob-3)])^2)
+sum2 = sum((x[3:(nob+1)]-2*x[2:nob]+x[1:(nob-1)])^2)
+D_hat<-0.5*log2(sum1/sum2)
+D_hat[is.nan(D_hat)]<-0
+d_B<-(B^(2-q*D_hat)*(log(log(log(B))))^0.1)^0.5
+var<-(B*d_B^2)^(-0.5) * sum( (sort(as.numeric(bootstrap_new_treatment_1))-mean(sort(as.numeric(bootstrap_new_treatment_1))))^2 )
+
+
+new_treatment11_sd<-var[1]
+
+
+u<-as.numeric(bootstrap_new_treatment_1/(var^0.5))
+u[is.nan(u)]<-0
+R<-list(u)
+
+
+
+R_sort<-list(sort(R[[1]]))
+
+
+k1<-round(B*(0.05/2))
+Quantile_upper<-R_sort[[1]][k1]
+
+
+k2<-round(B*(0.95/2))
+Quantile_lower<-R_sort[[1]][k2]
+
+
+
+upper1<-new_treatment_1-Quantile_upper*(var^0.5)
+lower1<-new_treatment_1+Quantile_lower*(var^0.5)
+
+
+upper1
+lower1
+
+
+ee<-c()
+for (p in 1:200){
+ee[p]<-p/10
+}
+
+e_hat<-c()
+for (r in 1:1){
+
+ff<-function (x){
+ exp(-(x-1)^2/(2*var[r]))
+}
+
+out<-c()
+for (p in 1:200){
+t<-1
+out[p]<-0.5*(2/3.1415926)^0.5*integrate( ff , lower=(1+ee[p])*t^(-0.5),upper=Inf)$value
+}
+
+e_hat[r]<-ee[which(out<=0.05)[1]]
+
+}
+
+e_hat1<-e_hat
+
+
+
+
+
+
+
+
+#2#
+bootstrap_new_treatment_2<-c()
+for (j in 1:100){
+
+T0<-sum(D==0)
+T1<-sum(D==0)+1
+
+t0<-sample((T0-15):(T0-10),1)
+
+t1<-sort(sample(300:800,500))
+t2<-t1^2
+
+i=2
+DD<-D[t0:(T0+i)]-c(rep(0,(T0-t0+1)),1,rep(0,1))
+yy<-y[t0:(T0+i)]-c(rep(0,(T0-t0+1)),new_treatment_1,rep(0,1))
+tt1<-t1[t0:(T0+i)]
+tt2<-t2[t0:(T0+i)]
+zz<-z[t0:(T0+i)]
+
+
+a_x<-2*(lm(DD~tt2+tt1)$coefficients[2])               
+a_y<-2*(lm(yy~tt2+tt1)$coefficients[2])             # 10.25* sum( (2*tt1*a_y+b_y)*w[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )  + 0.1* sum( (2*tt1*a_y+b_y)*z[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   ) 
+                                                                            
+b_x<-lm(DD~tt2+tt1)$coefficients[3]                # sum( (2*tt1*a_y+b_y)*x[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )
+b_y<-lm(yy~tt2+tt1)$coefficients[3]
+
+A_x<-a_x
+B_x<-(-a_x)                                                        
+A_y<-a_y
+B_y<-(-a_y)
+
+x_t<-2*(a_x)*tt1+b_x
+Y_t<-(a_y*x_t+a_x*b_y-a_y*b_x)/a_x
+new<-mean(predict(lm(yy~Y_t))[(T0-t0+2):(T0+i-t0+1)])-mean(predict(lm(yy~Y_t))[1:(T0-t0+1)])                              #new_gammabeta#
+ols<-(lm(yy~DD+zz-1))$coefficients[1]
+#library(robcp)
+#structure<-teststat(y)                                  
+
+a1<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(DD[1:(T0+i-t0+1)]*Y_t)-sum(DD[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a2<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(w[1:(T0+i-t0+1)]*Y_t)-sum(w[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a3<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(z[1:(T0+i-t0+1)]*Y_t)-sum(z[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a4<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(e[1:(T0+i-t0+1)]*Y_t)-sum(e[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+
+
+bootstrap_new_treatment_2[j]<-as.numeric( (new-coefficients(lm(yy~Y_t+z[t0:(T0+i)]+DD))[2]*(mean(Y_t[(T0-t0+1):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0)]))-a3*coefficients(lm(yy~Y_t+z[t0:(T0+i)]+DD))[3])/a1 )
+
+}
+
+
+B<-length(bootstrap_new_treatment_2)
+q=1
+x=sort(as.numeric(bootstrap_new_treatment_2))
+nob=length(x)-1 
+sum1 = sum((x[5:(nob+1)]-2*x[3:(nob-1)]+x[1:(nob-3)])^2)
+sum2 = sum((x[3:(nob+1)]-2*x[2:nob]+x[1:(nob-1)])^2)
+D_hat<-0.5*log2(sum1/sum2)
+D_hat[is.nan(D_hat)]<-0
+d_B<-(B^(2-q*D_hat)*(log(log(log(B))))^0.1)^0.5
+var<-(B*d_B^2)^(-0.5) * sum( (sort(as.numeric(bootstrap_new_treatment_2))-mean(sort(as.numeric(bootstrap_new_treatment_2))))^2 )
+
+
+new_treatment12_sd<-var[1]
+
+
+u<-as.numeric(bootstrap_new_treatment_2/(var^0.5))
+u[is.nan(u)]<-0
+R<-list(u)
+
+
+
+R_sort<-list(sort(R[[1]]))
+
+
+k1<-round(B*(0.05/2))
+Quantile_upper<-R_sort[[1]][k1]
+
+
+k2<-round(B*(0.95/2))
+Quantile_lower<-R_sort[[1]][k2]
+
+
+
+upper2<-new_treatment_2-Quantile_upper*(var^0.5)
+lower2<-new_treatment_2+Quantile_lower*(var^0.5)
+
+
+upper2
+lower2
+
+
+ee<-c()
+for (p in 1:200){
+ee[p]<-p/10
+}
+
+e_hat<-c()
+for (r in 1:1){
+
+ff<-function (x){
+ exp(-(x-1)^2/(2*var[r]))
+}
+
+out<-c()
+for (p in 1:200){
+t<-1
+out[p]<-0.5*(2/3.1415926)^0.5*integrate( ff , lower=(1+ee[p])*t^(-0.5),upper=Inf)$value
+}
+
+e_hat[r]<-ee[which(out<=0.05)[1]]
+
+}
+
+e_hat2<-e_hat
+
+
+
+
+#3#
+bootstrap_new_treatment_3<-c()
+for (j in 1:100){
+
+T0<-sum(D==0)
+T1<-sum(D==0)+1
+
+t0<-sample((T0-15):(T0-10),1)
+
+t1<-sort(sample(300:800,500))
+t2<-t1^2
+
+i=3
+DD<-D[t0:(T0+i)]-c(rep(0,(T0-t0+1)),1,1,rep(0,1))
+yy<-y[t0:(T0+i)]-c(rep(0,(T0-t0+1)),new_treatment_1,new_treatment_2,rep(0,1))
+tt1<-t1[t0:(T0+i)]
+tt2<-t2[t0:(T0+i)]
+zz<-z[t0:(T0+i)]
+
+
+a_x<-2*(lm(DD~tt2+tt1)$coefficients[2])               
+a_y<-2*(lm(yy~tt2+tt1)$coefficients[2])             # 10.25* sum( (2*tt1*a_y+b_y)*w[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )  + 0.1* sum( (2*tt1*a_y+b_y)*z[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   ) 
+                                                                            
+b_x<-lm(DD~tt2+tt1)$coefficients[3]                # sum( (2*tt1*a_y+b_y)*x[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )
+b_y<-lm(yy~tt2+tt1)$coefficients[3]
+
+A_x<-a_x
+B_x<-(-a_x)                                                        
+A_y<-a_y
+B_y<-(-a_y)
+
+x_t<-2*(a_x)*tt1+b_x
+Y_t<-(a_y*x_t+a_x*b_y-a_y*b_x)/a_x
+new<-mean(predict(lm(yy~Y_t))[(T0-t0+2):(T0+i-t0+1)])-mean(predict(lm(yy~Y_t))[1:(T0-t0+1)])                              #new_gammabeta#
+ols<-(lm(yy~DD+zz-1))$coefficients[1]
+#library(robcp)
+#structure<-teststat(y)                                  
+
+a1<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(DD[1:(T0+i-t0+1)]*Y_t)-sum(DD[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a2<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(w[1:(T0+i-t0+1)]*Y_t)-sum(w[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a3<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(z[1:(T0+i-t0+1)]*Y_t)-sum(z[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a4<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(e[1:(T0+i-t0+1)]*Y_t)-sum(e[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+
+
+bootstrap_new_treatment_3[j]<-as.numeric( (new-coefficients(lm(yy~Y_t+z[t0:(T0+i)]+DD))[2]*(mean(Y_t[(T0-t0+1):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0)]))-a3*coefficients(lm(yy~Y_t+z[t0:(T0+i)]+DD))[3])/a1 )
+
+}
+
+
+B<-length(bootstrap_new_treatment_3)
+q=1
+x=sort(as.numeric(bootstrap_new_treatment_3))
+nob=length(x)-1 
+sum1 = sum((x[5:(nob+1)]-2*x[3:(nob-1)]+x[1:(nob-3)])^2)
+sum2 = sum((x[3:(nob+1)]-2*x[2:nob]+x[1:(nob-1)])^2)
+D_hat<-0.5*log2(sum1/sum2)
+D_hat[is.nan(D_hat)]<-0
+d_B<-(B^(2-q*D_hat)*(log(log(log(B))))^0.1)^0.5
+var<-(B*d_B^2)^(-0.5) * sum( (sort(as.numeric(bootstrap_new_treatment_3))-mean(sort(as.numeric(bootstrap_new_treatment_3))))^2 )
+
+
+new_treatment13_sd<-var[1]
+
+
+u<-as.numeric(bootstrap_new_treatment_3/(var^0.5))
+u[is.nan(u)]<-0
+R<-list(u)
+
+
+
+R_sort<-list(sort(R[[1]]))
+
+
+k1<-round(B*(0.05/2))
+Quantile_upper<-R_sort[[1]][k1]
+
+
+k2<-round(B*(0.95/2))
+Quantile_lower<-R_sort[[1]][k2]
+
+
+
+upper3<-new_treatment_3-Quantile_upper*(var^0.5)
+lower3<-new_treatment_3+Quantile_lower*(var^0.5)
+
+
+upper3
+lower3
+
+
+ee<-c()
+for (p in 1:200){
+ee[p]<-p/10
+}
+
+e_hat<-c()
+for (r in 1:1){
+
+ff<-function (x){
+ exp(-(x-1)^2/(2*var[r]))
+}
+
+out<-c()
+for (p in 1:200){
+t<-1
+out[p]<-0.5*(2/3.1415926)^0.5*integrate( ff , lower=(1+ee[p])*t^(-0.5),upper=Inf)$value
+}
+
+e_hat[r]<-ee[which(out<=0.05)[1]]
+
+}
+
+e_hat3<-e_hat
+
+
+
+
+#4#
+bootstrap_new_treatment_4<-c()
+for (j in 1:100){
+
+T0<-sum(D==0)
+T1<-sum(D==0)+1
+
+t0<-sample((T0-15):(T0-10),1)
+
+t1<-sort(sample(300:800,500))
+t2<-t1^2
+
+i=4
+DD<-D[t0:(T0+i)]-c(rep(0,(T0-t0+1)),1,1,1,rep(0,1))
+yy<-y[t0:(T0+i)]-c(rep(0,(T0-t0+1)),new_treatment_1,new_treatment_2,new_treatment_3,rep(0,1))
+tt1<-t1[t0:(T0+i)]
+tt2<-t2[t0:(T0+i)]
+zz<-z[t0:(T0+i)]
+
+
+a_x<-2*(lm(DD~tt2+tt1)$coefficients[2])               
+a_y<-2*(lm(yy~tt2+tt1)$coefficients[2])             # 10.25* sum( (2*tt1*a_y+b_y)*w[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )  + 0.1* sum( (2*tt1*a_y+b_y)*z[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   ) 
+                                                                            
+b_x<-lm(DD~tt2+tt1)$coefficients[3]                # sum( (2*tt1*a_y+b_y)*x[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )
+b_y<-lm(yy~tt2+tt1)$coefficients[3]
+
+A_x<-a_x
+B_x<-(-a_x)                                                        
+A_y<-a_y
+B_y<-(-a_y)
+
+x_t<-2*(a_x)*tt1+b_x
+Y_t<-(a_y*x_t+a_x*b_y-a_y*b_x)/a_x
+new<-mean(predict(lm(yy~Y_t))[(T0-t0+2):(T0+i-t0+1)])-mean(predict(lm(yy~Y_t))[1:(T0-t0+1)])                              #new_gammabeta#
+ols<-(lm(yy~DD+zz-1))$coefficients[1]
+#library(robcp)
+#structure<-teststat(y)                                  
+
+a1<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(DD[1:(T0+i-t0+1)]*Y_t)-sum(DD[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a2<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(w[1:(T0+i-t0+1)]*Y_t)-sum(w[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a3<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(z[1:(T0+i-t0+1)]*Y_t)-sum(z[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a4<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(e[1:(T0+i-t0+1)]*Y_t)-sum(e[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+
+
+bootstrap_new_treatment_4[j]<-as.numeric( (new-coefficients(lm(yy~Y_t+z[t0:(T0+i)]+DD))[2]*(mean(Y_t[(T0-t0+1):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0)]))-a3*coefficients(lm(yy~Y_t+z[t0:(T0+i)]+DD))[3])/a1 )
+
+}
+
+
+
+B<-length(bootstrap_new_treatment_4)
+q=1
+x=sort(as.numeric(bootstrap_new_treatment_4))
+nob=length(x)-1 
+sum1 = sum((x[5:(nob+1)]-2*x[3:(nob-1)]+x[1:(nob-3)])^2)
+sum2 = sum((x[3:(nob+1)]-2*x[2:nob]+x[1:(nob-1)])^2)
+D_hat<-0.5*log2(sum1/sum2)
+D_hat[is.nan(D_hat)]<-0
+d_B<-(B^(2-q*D_hat)*(log(log(log(B))))^0.1)^0.5
+var<-(B*d_B^2)^(-0.5) * sum( (sort(as.numeric(bootstrap_new_treatment_4))-mean(sort(as.numeric(bootstrap_new_treatment_4))))^2 )
+
+
+new_treatment14_sd<-var[1]
+
+
+u<-as.numeric(bootstrap_new_treatment_4/(var^0.5))
+u[is.nan(u)]<-0
+R<-list(u)
+
+
+
+R_sort<-list(sort(R[[1]]))
+
+
+k1<-round(B*(0.05/2))
+Quantile_upper<-R_sort[[1]][k1]
+
+
+k2<-round(B*(0.95/2))
+Quantile_lower<-R_sort[[1]][k2]
+
+
+
+upper4<-new_treatment_4-Quantile_upper*(var^0.5)
+lower4<-new_treatment_4+Quantile_lower*(var^0.5)
+
+
+upper4
+lower4
+
+
+ee<-c()
+for (p in 1:200){
+ee[p]<-p/10
+}
+
+e_hat<-c()
+for (r in 1:1){
+
+ff<-function (x){
+ exp(-(x-1)^2/(2*var[r]))
+}
+
+out<-c()
+for (p in 1:200){
+t<-1
+out[p]<-0.5*(2/3.1415926)^0.5*integrate( ff , lower=(1+ee[p])*t^(-0.5),upper=Inf)$value
+}
+
+e_hat[r]<-ee[which(out<=0.05)[1]]
+
+}
+
+e_hat4<-e_hat
+
+
+
+
+
+
+#5#
+bootstrap_new_treatment_5<-c()
+for (j in 1:100){
+
+T0<-sum(D==0)
+T1<-sum(D==0)+1
+
+t0<-sample((T0-15):(T0-10),1)
+
+t1<-sort(sample(300:800,500))
+t2<-t1^2
+
+i=5
+DD<-D[t0:(T0+i)]-c(rep(0,(T0-t0+1)),1,1,1,1,rep(0,1))
+yy<-y[t0:(T0+i)]-c(rep(0,(T0-t0+1)),new_treatment_1,new_treatment_2,new_treatment_3,new_treatment_4,rep(0,1))
+tt1<-t1[t0:(T0+i)]
+tt2<-t2[t0:(T0+i)]
+zz<-z[t0:(T0+i)]
+
+
+a_x<-2*(lm(DD~tt2+tt1)$coefficients[2])               
+a_y<-2*(lm(yy~tt2+tt1)$coefficients[2])             # 10.25* sum( (2*tt1*a_y+b_y)*w[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )  + 0.1* sum( (2*tt1*a_y+b_y)*z[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   ) 
+                                                                            
+b_x<-lm(DD~tt2+tt1)$coefficients[3]                # sum( (2*tt1*a_y+b_y)*x[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )
+b_y<-lm(yy~tt2+tt1)$coefficients[3]
+
+A_x<-a_x
+B_x<-(-a_x)                                                        
+A_y<-a_y
+B_y<-(-a_y)
+
+x_t<-2*(a_x)*tt1+b_x
+Y_t<-(a_y*x_t+a_x*b_y-a_y*b_x)/a_x
+new<-mean(predict(lm(yy~Y_t))[(T0-t0+2):(T0+i-t0+1)])-mean(predict(lm(yy~Y_t))[1:(T0-t0+1)])                              #new_gammabeta#
+ols<-(lm(yy~DD+zz-1))$coefficients[1]
+#library(robcp)
+#structure<-teststat(y)                                  
+
+a1<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(DD[1:(T0+i-t0+1)]*Y_t)-sum(DD[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a2<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(w[1:(T0+i-t0+1)]*Y_t)-sum(w[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a3<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(z[1:(T0+i-t0+1)]*Y_t)-sum(z[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a4<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(e[1:(T0+i-t0+1)]*Y_t)-sum(e[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+
+
+bootstrap_new_treatment_5[j]<-as.numeric( (new-coefficients(lm(yy~Y_t+z[t0:(T0+i)]+DD))[2]*(mean(Y_t[(T0-t0+1):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0)]))-a3*coefficients(lm(yy~Y_t+z[t0:(T0+i)]+DD))[3])/a1 )
+
+}
+
+
+
+B<-length(bootstrap_new_treatment_5)
+q=1
+x=sort(as.numeric(bootstrap_new_treatment_5))
+nob=length(x)-1 
+sum1 = sum((x[5:(nob+1)]-2*x[3:(nob-1)]+x[1:(nob-3)])^2)
+sum2 = sum((x[3:(nob+1)]-2*x[2:nob]+x[1:(nob-1)])^2)
+D_hat<-0.5*log2(sum1/sum2)
+D_hat[is.nan(D_hat)]<-0
+d_B<-(B^(2-q*D_hat)*(log(log(log(B))))^0.1)^0.5
+var<-(B*d_B^2)^(-0.5) * sum( (sort(as.numeric(bootstrap_new_treatment_5))-mean(sort(as.numeric(bootstrap_new_treatment_5))))^2 )
+
+
+new_treatment15_sd<-var[1]
+
+
+u<-as.numeric(bootstrap_new_treatment_5/(var^0.5))
+u[is.nan(u)]<-0
+R<-list(u)
+
+
+
+R_sort<-list(sort(R[[1]]))
+
+
+k1<-round(B*(0.05/2))
+Quantile_upper<-R_sort[[1]][k1]
+
+
+k2<-round(B*(0.95/2))
+Quantile_lower<-R_sort[[1]][k2]
+
+
+
+upper5<-new_treatment_5-Quantile_upper*(var^0.5)
+lower5<-new_treatment_5+Quantile_lower*(var^0.5)
+
+
+upper5
+lower5
+
+
+ee<-c()
+for (p in 1:200){
+ee[p]<-p/10
+}
+
+e_hat<-c()
+for (r in 1:1){
+
+ff<-function (x){
+ exp(-(x-1)^2/(2*var[r]))
+}
+
+out<-c()
+for (p in 1:200){
+t<-1
+out[p]<-0.5*(2/3.1415926)^0.5*integrate( ff , lower=(1+ee[p])*t^(-0.5),upper=Inf)$value
+}
+
+e_hat[r]<-ee[which(out<=0.05)[1]]
+
+}
+
+e_hat5<-e_hat
+
+
+
+
+#6#
+bootstrap_new_treatment_6<-c()
+for (j in 1:100){
+
+T0<-sum(D==0)
+T1<-sum(D==0)+1
+
+t0<-sample((T0-15):(T0-10),1)
+
+t1<-sort(sample(300:800,500))
+t2<-t1^2
+
+i=6
+DD<-D[t0:(T0+i)]-c(rep(0,(T0-t0+1)),1,1,1,1,1,rep(0,1))
+yy<-y[t0:(T0+i)]-c(rep(0,(T0-t0+1)),new_treatment_1,new_treatment_2,new_treatment_3,new_treatment_4,new_treatment_5,rep(0,1))
+tt1<-t1[t0:(T0+i)]
+tt2<-t2[t0:(T0+i)]
+zz<-z[t0:(T0+i)]
+
+
+a_x<-2*(lm(DD~tt2+tt1)$coefficients[2])               
+a_y<-2*(lm(yy~tt2+tt1)$coefficients[2])             # 10.25* sum( (2*tt1*a_y+b_y)*w[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )  + 0.1* sum( (2*tt1*a_y+b_y)*z[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   ) 
+                                                                            
+b_x<-lm(DD~tt2+tt1)$coefficients[3]                # sum( (2*tt1*a_y+b_y)*x[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )
+b_y<-lm(yy~tt2+tt1)$coefficients[3]
+
+A_x<-a_x
+B_x<-(-a_x)                                                        
+A_y<-a_y
+B_y<-(-a_y)
+
+x_t<-2*(a_x)*tt1+b_x
+Y_t<-(a_y*x_t+a_x*b_y-a_y*b_x)/a_x
+new<-mean(predict(lm(yy~Y_t))[(T0-t0+2):(T0+i-t0+1)])-mean(predict(lm(yy~Y_t))[1:(T0-t0+1)])                              #new_gammabeta#
+ols<-(lm(yy~DD+zz-1))$coefficients[1]
+#library(robcp)
+#structure<-teststat(y)                                  
+
+a1<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(DD[1:(T0+i-t0+1)]*Y_t)-sum(DD[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a2<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(w[1:(T0+i-t0+1)]*Y_t)-sum(w[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a3<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(z[1:(T0+i-t0+1)]*Y_t)-sum(z[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a4<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(e[1:(T0+i-t0+1)]*Y_t)-sum(e[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+
+
+bootstrap_new_treatment_6[j]<-as.numeric( (new-coefficients(lm(yy~Y_t+z[t0:(T0+i)]+DD))[2]*(mean(Y_t[(T0-t0+1):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0)]))-a3*coefficients(lm(yy~Y_t+z[t0:(T0+i)]+DD))[3])/a1 )
+
+}
+
+
+
+B<-length(bootstrap_new_treatment_6)
+q=1
+x=sort(as.numeric(bootstrap_new_treatment_6))
+nob=length(x)-1 
+sum1 = sum((x[5:(nob+1)]-2*x[3:(nob-1)]+x[1:(nob-3)])^2)
+sum2 = sum((x[3:(nob+1)]-2*x[2:nob]+x[1:(nob-1)])^2)
+D_hat<-0.5*log2(sum1/sum2)
+D_hat[is.nan(D_hat)]<-0
+d_B<-(B^(2-q*D_hat)*(log(log(log(B))))^0.1)^0.5
+var<-(B*d_B^2)^(-0.5) * sum( (sort(as.numeric(bootstrap_new_treatment_6))-mean(sort(as.numeric(bootstrap_new_treatment_6))))^2 )
+
+
+new_treatment16_sd<-var[1]
+
+
+u<-as.numeric(bootstrap_new_treatment_6/(var^0.5))
+u[is.nan(u)]<-0
+R<-list(u)
+
+
+
+R_sort<-list(sort(R[[1]]))
+
+
+k1<-round(B*(0.05/2))
+Quantile_upper<-R_sort[[1]][k1]
+
+
+k2<-round(B*(0.95/2))
+Quantile_lower<-R_sort[[1]][k2]
+
+
+
+upper6<-new_treatment_6-Quantile_upper*(var^0.5)
+lower6<-new_treatment_6+Quantile_lower*(var^0.5)
+
+
+upper6
+lower6
+
+
+ee<-c()
+for (p in 1:200){
+ee[p]<-p/10
+}
+
+e_hat<-c()
+for (r in 1:1){
+
+ff<-function (x){
+ exp(-(x-1)^2/(2*var[r]))
+}
+
+out<-c()
+for (p in 1:200){
+t<-1
+out[p]<-0.5*(2/3.1415926)^0.5*integrate( ff , lower=(1+ee[p])*t^(-0.5),upper=Inf)$value
+}
+
+e_hat[r]<-ee[which(out<=0.05)[1]]
+
+}
+
+e_hat6<-e_hat
+
+
+
+#7#
+bootstrap_new_treatment_7<-c()
+for (j in 1:100){
+
+T0<-sum(D==0)
+T1<-sum(D==0)+1
+
+t0<-sample((T0-15):(T0-10),1)
+
+t1<-sort(sample(300:800,500))
+t2<-t1^2
+
+i=7
+DD<-D[t0:(T0+i)]-c(rep(0,(T0-t0+1)),1,1,1,1,1,1,rep(0,1))
+yy<-y[t0:(T0+i)]-c(rep(0,(T0-t0+1)),new_treatment_1,new_treatment_2,new_treatment_3,new_treatment_4,new_treatment_5,new_treatment_6,rep(0,1))
+tt1<-t1[t0:(T0+i)]
+tt2<-t2[t0:(T0+i)]
+zz<-z[t0:(T0+i)]
+
+
+a_x<-2*(lm(DD~tt2+tt1)$coefficients[2])               
+a_y<-2*(lm(yy~tt2+tt1)$coefficients[2])             # 10.25* sum( (2*tt1*a_y+b_y)*w[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )  + 0.1* sum( (2*tt1*a_y+b_y)*z[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   ) 
+                                                                            
+b_x<-lm(DD~tt2+tt1)$coefficients[3]                # sum( (2*tt1*a_y+b_y)*x[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )
+b_y<-lm(yy~tt2+tt1)$coefficients[3]
+
+A_x<-a_x
+B_x<-(-a_x)                                                        
+A_y<-a_y
+B_y<-(-a_y)
+
+x_t<-2*(a_x)*tt1+b_x
+Y_t<-(a_y*x_t+a_x*b_y-a_y*b_x)/a_x
+new<-mean(predict(lm(yy~Y_t))[(T0-t0+2):(T0+i-t0+1)])-mean(predict(lm(yy~Y_t))[1:(T0-t0+1)])                              #new_gammabeta#
+ols<-(lm(yy~DD+zz-1))$coefficients[1]
+#library(robcp)
+#structure<-teststat(y)                                  
+
+a1<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(DD[1:(T0+i-t0+1)]*Y_t)-sum(DD[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a2<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(w[1:(T0+i-t0+1)]*Y_t)-sum(w[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a3<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(z[1:(T0+i-t0+1)]*Y_t)-sum(z[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a4<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(e[1:(T0+i-t0+1)]*Y_t)-sum(e[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+
+
+bootstrap_new_treatment_7[j]<-as.numeric( (new-coefficients(lm(yy~Y_t+z[t0:(T0+i)]+DD))[2]*(mean(Y_t[(T0-t0+1):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0)]))-a3*coefficients(lm(yy~Y_t+z[t0:(T0+i)]+DD))[3])/a1 )
+
+}
+
+
+
+B<-length(bootstrap_new_treatment_7)
+q=1
+x=sort(as.numeric(bootstrap_new_treatment_7))
+nob=length(x)-1 
+sum1 = sum((x[5:(nob+1)]-2*x[3:(nob-1)]+x[1:(nob-3)])^2)
+sum2 = sum((x[3:(nob+1)]-2*x[2:nob]+x[1:(nob-1)])^2)
+D_hat<-0.5*log2(sum1/sum2)
+D_hat[is.nan(D_hat)]<-0
+d_B<-(B^(2-q*D_hat)*(log(log(log(B))))^0.1)^0.5
+var<-(B*d_B^2)^(-0.5) * sum( (sort(as.numeric(bootstrap_new_treatment_7))-mean(sort(as.numeric(bootstrap_new_treatment_7))))^2 )
+
+
+new_treatment17_sd<-var[1]
+
+
+u<-as.numeric(bootstrap_new_treatment_7/(var^0.5))
+u[is.nan(u)]<-0
+R<-list(u)
+
+
+
+R_sort<-list(sort(R[[1]]))
+
+
+k1<-round(B*(0.05/2))
+Quantile_upper<-R_sort[[1]][k1]
+
+
+k2<-round(B*(0.95/2))
+Quantile_lower<-R_sort[[1]][k2]
+
+
+
+upper7<-new_treatment_7-Quantile_upper*(var^0.5)
+lower7<-new_treatment_7+Quantile_lower*(var^0.5)
+
+
+upper7
+lower7
+
+
+ee<-c()
+for (p in 1:200){
+ee[p]<-p/10
+}
+
+e_hat<-c()
+for (r in 1:1){
+
+ff<-function (x){
+ exp(-(x-1)^2/(2*var[r]))
+}
+
+out<-c()
+for (p in 1:200){
+t<-1
+out[p]<-0.5*(2/3.1415926)^0.5*integrate( ff , lower=(1+ee[p])*t^(-0.5),upper=Inf)$value
+}
+
+e_hat[r]<-ee[which(out<=0.05)[1]]
+
+}
+
+e_hat7<-e_hat
+
+
+
+
+
+#8#
+bootstrap_new_treatment_8<-c()
+for (j in 1:100){
+
+T0<-sum(D==0)
+T1<-sum(D==0)+1
+
+t0<-sample((T0-15):(T0-10),1)
+
+t1<-sort(sample(300:800,500))
+t2<-t1^2
+
+i=8
+DD<-D[t0:(T0+i)]-c(rep(0,(T0-t0+1)),1,1,1,1,1,1,1,rep(0,1))
+yy<-y[t0:(T0+i)]-c(rep(0,(T0-t0+1)),new_treatment_1,new_treatment_2,new_treatment_3,new_treatment_4,new_treatment_5,new_treatment_6,new_treatment_7,rep(0,1))
+tt1<-t1[t0:(T0+i)]
+tt2<-t2[t0:(T0+i)]
+zz<-z[t0:(T0+i)]
+
+
+a_x<-2*(lm(DD~tt2+tt1)$coefficients[2])               
+a_y<-2*(lm(yy~tt2+tt1)$coefficients[2])             # 10.25* sum( (2*tt1*a_y+b_y)*w[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )  + 0.1* sum( (2*tt1*a_y+b_y)*z[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   ) 
+                                                                            
+b_x<-lm(DD~tt2+tt1)$coefficients[3]                # sum( (2*tt1*a_y+b_y)*x[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )
+b_y<-lm(yy~tt2+tt1)$coefficients[3]
+
+A_x<-a_x
+B_x<-(-a_x)                                                        
+A_y<-a_y
+B_y<-(-a_y)
+
+x_t<-2*(a_x)*tt1+b_x
+Y_t<-(a_y*x_t+a_x*b_y-a_y*b_x)/a_x
+new<-mean(predict(lm(yy~Y_t))[(T0-t0+2):(T0+i-t0+1)])-mean(predict(lm(yy~Y_t))[1:(T0-t0+1)])                              #new_gammabeta#
+ols<-(lm(yy~DD+zz-1))$coefficients[1]
+#library(robcp)
+#structure<-teststat(y)                                  
+
+a1<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(DD[1:(T0+i-t0+1)]*Y_t)-sum(DD[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a2<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(w[1:(T0+i-t0+1)]*Y_t)-sum(w[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a3<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(z[1:(T0+i-t0+1)]*Y_t)-sum(z[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a4<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(e[1:(T0+i-t0+1)]*Y_t)-sum(e[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+
+
+bootstrap_new_treatment_8[j]<-as.numeric( (new-coefficients(lm(yy~Y_t+z[t0:(T0+i)]+DD))[2]*(mean(Y_t[(T0-t0+1):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0)]))-a3*coefficients(lm(yy~Y_t+z[t0:(T0+i)]+DD))[3])/a1 )
+
+}
+
+
+
+B<-length(bootstrap_new_treatment_8)
+q=1
+x=sort(as.numeric(bootstrap_new_treatment_8))
+nob=length(x)-1 
+sum1 = sum((x[5:(nob+1)]-2*x[3:(nob-1)]+x[1:(nob-3)])^2)
+sum2 = sum((x[3:(nob+1)]-2*x[2:nob]+x[1:(nob-1)])^2)
+D_hat<-0.5*log2(sum1/sum2)
+D_hat[is.nan(D_hat)]<-0
+d_B<-(B^(2-q*D_hat)*(log(log(log(B))))^0.1)^0.5
+var<-(B*d_B^2)^(-0.5) * sum( (sort(as.numeric(bootstrap_new_treatment_8))-mean(sort(as.numeric(bootstrap_new_treatment_8))))^2 )
+
+
+new_treatment18_sd<-var[1]
+
+
+u<-as.numeric(bootstrap_new_treatment_8/(var^0.5))
+u[is.nan(u)]<-0
+R<-list(u)
+
+
+
+R_sort<-list(sort(R[[1]]))
+
+
+k1<-round(B*(0.05/2))
+Quantile_upper<-R_sort[[1]][k1]
+
+
+k2<-round(B*(0.95/2))
+Quantile_lower<-R_sort[[1]][k2]
+
+
+
+upper8<-new_treatment_8-Quantile_upper*(var^0.5)
+lower8<-new_treatment_8+Quantile_lower*(var^0.5)
+
+
+upper8
+lower8
+
+
+ee<-c()
+for (p in 1:200){
+ee[p]<-p/10
+}
+
+e_hat<-c()
+for (r in 1:1){
+
+ff<-function (x){
+ exp(-(x-1)^2/(2*var[r]))
+}
+
+out<-c()
+for (p in 1:200){
+t<-1
+out[p]<-0.5*(2/3.1415926)^0.5*integrate( ff , lower=(1+ee[p])*t^(-0.5),upper=Inf)$value
+}
+
+e_hat[r]<-ee[which(out<=0.05)[1]]
+
+}
+
+e_hat8<-e_hat
+
+
+
+
+
+#9#
+bootstrap_new_treatment_9<-c()
+for (j in 1:100){
+
+T0<-sum(D==0)
+T1<-sum(D==0)+1
+
+t0<-sample((T0-15):(T0-10),1)
+
+t1<-sort(sample(300:800,500))
+t2<-t1^2
+
+i=9
+DD<-D[t0:(T0+i)]-c(rep(0,(T0-t0+1)),1,1,1,1,1,1,1,1,rep(0,1))
+yy<-y[t0:(T0+i)]-c(rep(0,(T0-t0+1)),new_treatment_1,new_treatment_2,new_treatment_3,new_treatment_4,new_treatment_5,new_treatment_6,new_treatment_7,new_treatment_8,rep(0,1))
+tt1<-t1[t0:(T0+i)]
+tt2<-t2[t0:(T0+i)]
+zz<-z[t0:(T0+i)]
+
+
+a_x<-2*(lm(DD~tt2+tt1)$coefficients[2])               
+a_y<-2*(lm(yy~tt2+tt1)$coefficients[2])             # 10.25* sum( (2*tt1*a_y+b_y)*w[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )  + 0.1* sum( (2*tt1*a_y+b_y)*z[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   ) 
+                                                                            
+b_x<-lm(DD~tt2+tt1)$coefficients[3]                # sum( (2*tt1*a_y+b_y)*x[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )
+b_y<-lm(yy~tt2+tt1)$coefficients[3]
+
+A_x<-a_x
+B_x<-(-a_x)                                                        
+A_y<-a_y
+B_y<-(-a_y)
+
+x_t<-2*(a_x)*tt1+b_x
+Y_t<-(a_y*x_t+a_x*b_y-a_y*b_x)/a_x
+new<-mean(predict(lm(yy~Y_t))[(T0-t0+2):(T0+i-t0+1)])-mean(predict(lm(yy~Y_t))[1:(T0-t0+1)])                              #new_gammabeta#
+ols<-(lm(yy~DD+zz-1))$coefficients[1]
+#library(robcp)
+#structure<-teststat(y)                                  
+
+a1<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(DD[1:(T0+i-t0+1)]*Y_t)-sum(DD[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a2<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(w[1:(T0+i-t0+1)]*Y_t)-sum(w[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a3<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(z[1:(T0+i-t0+1)]*Y_t)-sum(z[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a4<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(e[1:(T0+i-t0+1)]*Y_t)-sum(e[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+
+
+bootstrap_new_treatment_9[j]<-as.numeric( (new-coefficients(lm(yy~Y_t+z[t0:(T0+i)]+DD))[2]*(mean(Y_t[(T0-t0+1):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0)]))-a3*coefficients(lm(yy~Y_t+z[t0:(T0+i)]+DD))[3])/a1 )
+
+}
+
+
+
+B<-length(bootstrap_new_treatment_9)
+q=1
+x=sort(as.numeric(bootstrap_new_treatment_9))
+nob=length(x)-1 
+sum1 = sum((x[5:(nob+1)]-2*x[3:(nob-1)]+x[1:(nob-3)])^2)
+sum2 = sum((x[3:(nob+1)]-2*x[2:nob]+x[1:(nob-1)])^2)
+D_hat<-0.5*log2(sum1/sum2)
+D_hat[is.nan(D_hat)]<-0
+d_B<-(B^(2-q*D_hat)*(log(log(log(B))))^0.1)^0.5
+var<-(B*d_B^2)^(-0.5) * sum( (sort(as.numeric(bootstrap_new_treatment_9))-mean(sort(as.numeric(bootstrap_new_treatment_9))))^2 )
+
+
+new_treatment19_sd<-var[1]
+
+
+u<-as.numeric(bootstrap_new_treatment_9/(var^0.5))
+u[is.nan(u)]<-0
+R<-list(u)
+
+
+
+R_sort<-list(sort(R[[1]]))
+
+
+k1<-round(B*(0.05/2))
+Quantile_upper<-R_sort[[1]][k1]
+
+
+k2<-round(B*(0.95/2))
+Quantile_lower<-R_sort[[1]][k2]
+
+
+
+upper9<-new_treatment_9-Quantile_upper*(var^0.5)
+lower9<-new_treatment_9+Quantile_lower*(var^0.5)
+
+
+upper9
+lower9
+
+
+ee<-c()
+for (p in 1:200){
+ee[p]<-p/10
+}
+
+e_hat<-c()
+for (r in 1:1){
+
+ff<-function (x){
+ exp(-(x-1)^2/(2*var[r]))
+}
+
+out<-c()
+for (p in 1:200){
+t<-1
+out[p]<-0.5*(2/3.1415926)^0.5*integrate( ff , lower=(1+ee[p])*t^(-0.5),upper=Inf)$value
+}
+
+e_hat[r]<-ee[which(out<=0.05)[1]]
+
+}
+
+e_hat9<-e_hat
+
+
+
+
+
+
+
+
+#10#
+bootstrap_new_treatment_10<-c()
+for (j in 1:100){
+
+T0<-sum(D==0)
+T1<-sum(D==0)+1
+
+t0<-sample((T0-15):(T0-10),1)
+
+t1<-sort(sample(300:800,500))
+t2<-t1^2
+
+i=10
+DD<-D[t0:(T0+i)]-c(rep(0,(T0-t0+1)),1,1,1,1,1,1,1,1,1,rep(0,1))
+yy<-y[t0:(T0+i)]-c(rep(0,(T0-t0+1)),new_treatment_1,new_treatment_2,new_treatment_3,new_treatment_4,new_treatment_5,new_treatment_6,new_treatment_7,new_treatment_8,new_treatment_9,rep(0,1))
+tt1<-t1[t0:(T0+i)]
+tt2<-t2[t0:(T0+i)]
+zz<-z[t0:(T0+i)]
+
+
+a_x<-2*(lm(DD~tt2+tt1)$coefficients[2])               
+a_y<-2*(lm(yy~tt2+tt1)$coefficients[2])             # 10.25* sum( (2*tt1*a_y+b_y)*w[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )  + 0.1* sum( (2*tt1*a_y+b_y)*z[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   ) 
+                                                                            
+b_x<-lm(DD~tt2+tt1)$coefficients[3]                # sum( (2*tt1*a_y+b_y)*x[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )
+b_y<-lm(yy~tt2+tt1)$coefficients[3]
+
+A_x<-a_x
+B_x<-(-a_x)                                                        
+A_y<-a_y
+B_y<-(-a_y)
+
+x_t<-2*(a_x)*tt1+b_x
+Y_t<-(a_y*x_t+a_x*b_y-a_y*b_x)/a_x
+new<-mean(predict(lm(yy~Y_t))[(T0-t0+2):(T0+i-t0+1)])-mean(predict(lm(yy~Y_t))[1:(T0-t0+1)])                              #new_gammabeta#
+ols<-(lm(yy~DD+zz-1))$coefficients[1]
+#library(robcp)
+#structure<-teststat(y)                                  
+
+a1<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(DD[1:(T0+i-t0+1)]*Y_t)-sum(DD[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a2<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(w[1:(T0+i-t0+1)]*Y_t)-sum(w[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a3<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(z[1:(T0+i-t0+1)]*Y_t)-sum(z[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a4<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(e[1:(T0+i-t0+1)]*Y_t)-sum(e[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+
+
+bootstrap_new_treatment_10[j]<-as.numeric( (new-coefficients(lm(yy~Y_t+z[t0:(T0+i)]+DD))[2]*(mean(Y_t[(T0-t0+1):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0)]))-a3*coefficients(lm(yy~Y_t+z[t0:(T0+i)]+DD))[3])/a1 )
+
+}
+
+
+
+B<-length(bootstrap_new_treatment_10)
+q=1
+x=sort(as.numeric(bootstrap_new_treatment_10))
+nob=length(x)-1 
+sum1 = sum((x[5:(nob+1)]-2*x[3:(nob-1)]+x[1:(nob-3)])^2)
+sum2 = sum((x[3:(nob+1)]-2*x[2:nob]+x[1:(nob-1)])^2)
+D_hat<-0.5*log2(sum1/sum2)
+D_hat[is.nan(D_hat)]<-0
+d_B<-(B^(2-q*D_hat)*(log(log(log(B))))^0.1)^0.5
+var<-(B*d_B^2)^(-0.5) * sum( (sort(as.numeric(bootstrap_new_treatment_10))-mean(sort(as.numeric(bootstrap_new_treatment_10))))^2 )
+
+
+new_treatment110_sd<-var[1]
+
+
+u<-as.numeric(bootstrap_new_treatment_10/(var^0.5))
+u[is.nan(u)]<-0
+R<-list(u)
+
+
+
+R_sort<-list(sort(R[[1]]))
+
+
+k1<-round(B*(0.05/2))
+Quantile_upper<-R_sort[[1]][k1]
+
+
+k2<-round(B*(0.95/2))
+Quantile_lower<-R_sort[[1]][k2]
+
+
+
+upper10<-new_treatment_10-Quantile_upper*(var^0.5)
+lower10<-new_treatment_10+Quantile_lower*(var^0.5)
+
+
+upper10
+lower10
+
+
+ee<-c()
+for (p in 1:200){
+ee[p]<-p/10
+}
+
+e_hat<-c()
+for (r in 1:1){
+
+ff<-function (x){
+ exp(-(x-1)^2/(2*var[r]))
+}
+
+out<-c()
+for (p in 1:200){
+t<-1
+out[p]<-0.5*(2/3.1415926)^0.5*integrate( ff , lower=(1+ee[p])*t^(-0.5),upper=Inf)$value
+}
+
+e_hat[r]<-ee[which(out<=0.05)[1]]
+
+}
+
+e_hat10<-e_hat
+
+
+
+#11#
+bootstrap_new_treatment_11<-c()
+for (j in 1:100){
+
+T0<-sum(D==0)
+T1<-sum(D==0)+1
+
+t0<-sample((T0-15):(T0-10),1)
+
+t1<-sort(sample(300:800,500))
+t2<-t1^2
+
+i=11
+DD<-D[t0:(T0+i)]-c(rep(0,(T0-t0+1)),1,1,1,1,1,1,1,1,1,1,rep(0,1))
+yy<-y[t0:(T0+i)]-c(rep(0,(T0-t0+1)),new_treatment_1,new_treatment_2,new_treatment_3,new_treatment_4,new_treatment_5,new_treatment_6,new_treatment_7,new_treatment_8,new_treatment_9,new_treatment_10,rep(0,1))
+tt1<-t1[t0:(T0+i)]
+tt2<-t2[t0:(T0+i)]
+zz<-z[t0:(T0+i)]
+
+
+a_x<-2*(lm(DD~tt2+tt1)$coefficients[2])               
+a_y<-2*(lm(yy~tt2+tt1)$coefficients[2])             # 10.25* sum( (2*tt1*a_y+b_y)*w[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )  + 0.1* sum( (2*tt1*a_y+b_y)*z[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   ) 
+                                                                            
+b_x<-lm(DD~tt2+tt1)$coefficients[3]                # sum( (2*tt1*a_y+b_y)*x[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )
+b_y<-lm(yy~tt2+tt1)$coefficients[3]
+
+A_x<-a_x
+B_x<-(-a_x)                                                        
+A_y<-a_y
+B_y<-(-a_y)
+
+x_t<-2*(a_x)*tt1+b_x
+Y_t<-(a_y*x_t+a_x*b_y-a_y*b_x)/a_x
+new<-mean(predict(lm(yy~Y_t))[(T0-t0+2):(T0+i-t0+1)])-mean(predict(lm(yy~Y_t))[1:(T0-t0+1)])                              #new_gammabeta#
+ols<-(lm(yy~DD+zz-1))$coefficients[1]
+#library(robcp)
+#structure<-teststat(y)                                  
+
+a1<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(DD[1:(T0+i-t0+1)]*Y_t)-sum(DD[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a2<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(w[1:(T0+i-t0+1)]*Y_t)-sum(w[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a3<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(z[1:(T0+i-t0+1)]*Y_t)-sum(z[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a4<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(e[1:(T0+i-t0+1)]*Y_t)-sum(e[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+
+
+bootstrap_new_treatment_11[j]<-as.numeric( (new-coefficients(lm(yy~Y_t+z[t0:(T0+i)]+DD))[2]*(mean(Y_t[(T0-t0+1):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0)]))-a3*coefficients(lm(yy~Y_t+z[t0:(T0+i)]+DD))[3])/a1 )
+
+}
+
+
+B<-length(bootstrap_new_treatment_11)
+q=1
+x=sort(as.numeric(bootstrap_new_treatment_11))
+nob=length(x)-1 
+sum1 = sum((x[5:(nob+1)]-2*x[3:(nob-1)]+x[1:(nob-3)])^2)
+sum2 = sum((x[3:(nob+1)]-2*x[2:nob]+x[1:(nob-1)])^2)
+D_hat<-0.5*log2(sum1/sum2)
+D_hat[is.nan(D_hat)]<-0
+d_B<-(B^(2-q*D_hat)*(log(log(log(B))))^0.1)^0.5
+var<-(B*d_B^2)^(-0.5) * sum( (sort(as.numeric(bootstrap_new_treatment_11))-mean(sort(as.numeric(bootstrap_new_treatment_11))))^2 )
+
+
+new_treatment111_sd<-var[1]
+
+
+u<-as.numeric(bootstrap_new_treatment_11/(var^0.5))
+u[is.nan(u)]<-0
+R<-list(u)
+
+
+
+R_sort<-list(sort(R[[1]]))
+
+
+k1<-round(B*(0.05/2))
+Quantile_upper<-R_sort[[1]][k1]
+
+
+k2<-round(B*(0.95/2))
+Quantile_lower<-R_sort[[1]][k2]
+
+
+
+upper11<-new_treatment_11-Quantile_upper*(var^0.5)
+lower11<-new_treatment_11+Quantile_lower*(var^0.5)
+
+
+upper11
+lower11
+
+
+ee<-c()
+for (p in 1:200){
+ee[p]<-p/10
+}
+
+e_hat<-c()
+for (r in 1:1){
+
+ff<-function (x){
+ exp(-(x-1)^2/(2*var[r]))
+}
+
+out<-c()
+for (p in 1:200){
+t<-1
+out[p]<-0.5*(2/3.1415926)^0.5*integrate( ff , lower=(1+ee[p])*t^(-0.5),upper=Inf)$value
+}
+
+e_hat[r]<-ee[which(out<=0.05)[1]]
+
+}
+
+e_hat11<-e_hat
+
+
+
+
+#12#
+bootstrap_new_treatment_12<-c()
+for (j in 1:100){
+
+T0<-sum(D==0)
+T1<-sum(D==0)+1
+
+t0<-sample((T0-15):(T0-10),1)
+
+t1<-sort(sample(300:800,500))
+t2<-t1^2
+
+i=12
+DD<-D[t0:(T0+i)]-c(rep(0,(T0-t0+1)),1,1,1,1,1,1,1,1,1,1,1,rep(0,1))
+yy<-y[t0:(T0+i)]-c(rep(0,(T0-t0+1)),new_treatment_1,new_treatment_2,new_treatment_3,new_treatment_4,new_treatment_5,new_treatment_6,new_treatment_7,new_treatment_8,new_treatment_9,new_treatment_10,new_treatment_11,rep(0,1))
+tt1<-t1[t0:(T0+i)]
+tt2<-t2[t0:(T0+i)]
+zz<-z[t0:(T0+i)]
+
+
+a_x<-2*(lm(DD~tt2+tt1)$coefficients[2])               
+a_y<-2*(lm(yy~tt2+tt1)$coefficients[2])             # 10.25* sum( (2*tt1*a_y+b_y)*w[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )  + 0.1* sum( (2*tt1*a_y+b_y)*z[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   ) 
+                                                                            
+b_x<-lm(DD~tt2+tt1)$coefficients[3]                # sum( (2*tt1*a_y+b_y)*x[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )
+b_y<-lm(yy~tt2+tt1)$coefficients[3]
+
+A_x<-a_x
+B_x<-(-a_x)                                                        
+A_y<-a_y
+B_y<-(-a_y)
+
+x_t<-2*(a_x)*tt1+b_x
+Y_t<-(a_y*x_t+a_x*b_y-a_y*b_x)/a_x
+new<-mean(predict(lm(yy~Y_t))[(T0-t0+2):(T0+i-t0+1)])-mean(predict(lm(yy~Y_t))[1:(T0-t0+1)])                              #new_gammabeta#
+ols<-(lm(yy~DD+zz-1))$coefficients[1]
+#library(robcp)
+#structure<-teststat(y)                                  
+
+a1<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(DD[1:(T0+i-t0+1)]*Y_t)-sum(DD[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a2<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(w[1:(T0+i-t0+1)]*Y_t)-sum(w[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a3<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(z[1:(T0+i-t0+1)]*Y_t)-sum(z[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a4<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(e[1:(T0+i-t0+1)]*Y_t)-sum(e[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+
+
+bootstrap_new_treatment_12[j]<-as.numeric( (new-coefficients(lm(yy~Y_t+z[t0:(T0+i)]+DD))[2]*(mean(Y_t[(T0-t0+1):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0)]))-a3*coefficients(lm(yy~Y_t+z[t0:(T0+i)]+DD))[3])/a1 )
+
+}
+
+
+B<-length(bootstrap_new_treatment_12)
+q=1
+x=sort(as.numeric(bootstrap_new_treatment_12))
+nob=length(x)-1 
+sum1 = sum((x[5:(nob+1)]-2*x[3:(nob-1)]+x[1:(nob-3)])^2)
+sum2 = sum((x[3:(nob+1)]-2*x[2:nob]+x[1:(nob-1)])^2)
+D_hat<-0.5*log2(sum1/sum2)
+D_hat[is.nan(D_hat)]<-0
+d_B<-(B^(2-q*D_hat)*(log(log(log(B))))^0.1)^0.5
+var<-(B*d_B^2)^(-0.5) * sum( (sort(as.numeric(bootstrap_new_treatment_12))-mean(sort(as.numeric(bootstrap_new_treatment_12))))^2 )
+
+
+new_treatment112_sd<-var[1]
+
+
+u<-as.numeric(bootstrap_new_treatment_12/(var^0.5))
+u[is.nan(u)]<-0
+R<-list(u)
+
+
+
+R_sort<-list(sort(R[[1]]))
+
+
+k1<-round(B*(0.05/2))
+Quantile_upper<-R_sort[[1]][k1]
+
+
+k2<-round(B*(0.95/2))
+Quantile_lower<-R_sort[[1]][k2]
+
+
+
+upper12<-new_treatment_12-Quantile_upper*(var^0.5)
+lower12<-new_treatment_12+Quantile_lower*(var^0.5)
+
+
+upper12
+lower12
+
+
+ee<-c()
+for (p in 1:200){
+ee[p]<-p/10
+}
+
+e_hat<-c()
+for (r in 1:1){
+
+ff<-function (x){
+ exp(-(x-1)^2/(2*var[r]))
+}
+
+out<-c()
+for (p in 1:200){
+t<-1
+out[p]<-0.5*(2/3.1415926)^0.5*integrate( ff , lower=(1+ee[p])*t^(-0.5),upper=Inf)$value
+}
+
+e_hat[r]<-ee[which(out<=0.05)[1]]
+
+}
+
+e_hat12<-e_hat
+
+
+
+#13#
+bootstrap_new_treatment_13<-c()
+for (j in 1:100){
+
+T0<-sum(D==0)
+T1<-sum(D==0)+1
+
+t0<-sample((T0-15):(T0-10),1)
+
+t1<-sort(sample(300:800,500))
+t2<-t1^2
+
+i=13
+DD<-D[t0:(T0+i)]-c(rep(0,(T0-t0+1)),1,1,1,1,1,1,1,1,1,1,1,1,rep(0,1))
+yy<-y[t0:(T0+i)]-c(rep(0,(T0-t0+1)),new_treatment_1,new_treatment_2,new_treatment_3,new_treatment_4,new_treatment_5,new_treatment_6,new_treatment_7,new_treatment_8,new_treatment_9,new_treatment_10,new_treatment_11,new_treatment_12,rep(0,1))
+tt1<-t1[t0:(T0+i)]
+tt2<-t2[t0:(T0+i)]
+zz<-z[t0:(T0+i)]
+
+
+a_x<-2*(lm(DD~tt2+tt1)$coefficients[2])               
+a_y<-2*(lm(yy~tt2+tt1)$coefficients[2])             # 10.25* sum( (2*tt1*a_y+b_y)*w[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )  + 0.1* sum( (2*tt1*a_y+b_y)*z[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   ) 
+                                                                            
+b_x<-lm(DD~tt2+tt1)$coefficients[3]                # sum( (2*tt1*a_y+b_y)*x[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )
+b_y<-lm(yy~tt2+tt1)$coefficients[3]
+
+A_x<-a_x
+B_x<-(-a_x)                                                        
+A_y<-a_y
+B_y<-(-a_y)
+
+x_t<-2*(a_x)*tt1+b_x
+Y_t<-(a_y*x_t+a_x*b_y-a_y*b_x)/a_x
+new<-mean(predict(lm(yy~Y_t))[(T0-t0+2):(T0+i-t0+1)])-mean(predict(lm(yy~Y_t))[1:(T0-t0+1)])                              #new_gammabeta#
+ols<-(lm(yy~DD+zz-1))$coefficients[1]
+#library(robcp)
+#structure<-teststat(y)                                  
+
+a1<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(DD[1:(T0+i-t0+1)]*Y_t)-sum(DD[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a2<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(w[1:(T0+i-t0+1)]*Y_t)-sum(w[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a3<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(z[1:(T0+i-t0+1)]*Y_t)-sum(z[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a4<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(e[1:(T0+i-t0+1)]*Y_t)-sum(e[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+
+
+bootstrap_new_treatment_13[j]<-as.numeric( (new-coefficients(lm(yy~Y_t+z[t0:(T0+i)]+DD))[2]*(mean(Y_t[(T0-t0+1):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0)]))-a3*coefficients(lm(yy~Y_t+z[t0:(T0+i)]+DD))[3])/a1 )
+
+}
+
+
+B<-length(bootstrap_new_treatment_13)
+q=1
+x=sort(as.numeric(bootstrap_new_treatment_13))
+nob=length(x)-1 
+sum1 = sum((x[5:(nob+1)]-2*x[3:(nob-1)]+x[1:(nob-3)])^2)
+sum2 = sum((x[3:(nob+1)]-2*x[2:nob]+x[1:(nob-1)])^2)
+D_hat<-0.5*log2(sum1/sum2)
+D_hat[is.nan(D_hat)]<-0
+d_B<-(B^(2-q*D_hat)*(log(log(log(B))))^0.1)^0.5
+var<-(B*d_B^2)^(-0.5) * sum( (sort(as.numeric(bootstrap_new_treatment_13))-mean(sort(as.numeric(bootstrap_new_treatment_13))))^2 )
+
+
+new_treatment113_sd<-var[1]
+
+
+u<-as.numeric(bootstrap_new_treatment_13/(var^0.5))
+u[is.nan(u)]<-0
+R<-list(u)
+
+
+
+R_sort<-list(sort(R[[1]]))
+
+
+k1<-round(B*(0.05/2))
+Quantile_upper<-R_sort[[1]][k1]
+
+
+k2<-round(B*(0.95/2))
+Quantile_lower<-R_sort[[1]][k2]
+
+
+
+upper13<-new_treatment_13-Quantile_upper*(var^0.5)
+lower13<-new_treatment_13+Quantile_lower*(var^0.5)
+
+
+upper13
+lower13
+
+
+ee<-c()
+for (p in 1:200){
+ee[p]<-p/10
+}
+
+e_hat<-c()
+for (r in 1:1){
+
+ff<-function (x){
+ exp(-(x-1)^2/(2*var[r]))
+}
+
+out<-c()
+for (p in 1:200){
+t<-1
+out[p]<-0.5*(2/3.1415926)^0.5*integrate( ff , lower=(1+ee[p])*t^(-0.5),upper=Inf)$value
+}
+
+e_hat[r]<-ee[which(out<=0.05)[1]]
+
+}
+
+e_hat13<-e_hat
+
+
+
+
+#14#
+bootstrap_new_treatment_14<-c()
+for (j in 1:100){
+
+T0<-sum(D==0)
+T1<-sum(D==0)+1
+
+t0<-sample((T0-15):(T0-10),1)
+
+t1<-sort(sample(300:800,500))
+t2<-t1^2
+
+i=14
+DD<-D[t0:(T0+i)]-c(rep(0,(T0-t0+1)),1,1,1,1,1,1,1,1,1,1,1,1,1,rep(0,1))
+yy<-y[t0:(T0+i)]-c(rep(0,(T0-t0+1)),new_treatment_1,new_treatment_2,new_treatment_3,new_treatment_4,new_treatment_5,new_treatment_6,new_treatment_7,new_treatment_8,new_treatment_9,new_treatment_10,new_treatment_11,new_treatment_12,new_treatment_13,rep(0,1))
+tt1<-t1[t0:(T0+i)]
+tt2<-t2[t0:(T0+i)]
+zz<-z[t0:(T0+i)]
+
+
+a_x<-2*(lm(DD~tt2+tt1)$coefficients[2])               
+a_y<-2*(lm(yy~tt2+tt1)$coefficients[2])             # 10.25* sum( (2*tt1*a_y+b_y)*w[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )  + 0.1* sum( (2*tt1*a_y+b_y)*z[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   ) 
+                                                                            
+b_x<-lm(DD~tt2+tt1)$coefficients[3]                # sum( (2*tt1*a_y+b_y)*x[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )
+b_y<-lm(yy~tt2+tt1)$coefficients[3]
+
+A_x<-a_x
+B_x<-(-a_x)                                                        
+A_y<-a_y
+B_y<-(-a_y)
+
+x_t<-2*(a_x)*tt1+b_x
+Y_t<-(a_y*x_t+a_x*b_y-a_y*b_x)/a_x
+new<-mean(predict(lm(yy~Y_t))[(T0-t0+2):(T0+i-t0+1)])-mean(predict(lm(yy~Y_t))[1:(T0-t0+1)])                              #new_gammabeta#
+ols<-(lm(yy~DD+zz-1))$coefficients[1]
+#library(robcp)
+#structure<-teststat(y)                                  
+
+a1<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(DD[1:(T0+i-t0+1)]*Y_t)-sum(DD[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a2<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(w[1:(T0+i-t0+1)]*Y_t)-sum(w[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a3<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(z[1:(T0+i-t0+1)]*Y_t)-sum(z[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a4<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(e[1:(T0+i-t0+1)]*Y_t)-sum(e[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+
+
+bootstrap_new_treatment_14[j]<-as.numeric( (new-coefficients(lm(yy~Y_t+z[t0:(T0+i)]+DD))[2]*(mean(Y_t[(T0-t0+1):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0)]))-a3*coefficients(lm(yy~Y_t+z[t0:(T0+i)]+DD))[3])/a1 )
+
+}
+
+
+B<-length(bootstrap_new_treatment_14)
+q=1
+x=sort(as.numeric(bootstrap_new_treatment_14))
+nob=length(x)-1 
+sum1 = sum((x[5:(nob+1)]-2*x[3:(nob-1)]+x[1:(nob-3)])^2)
+sum2 = sum((x[3:(nob+1)]-2*x[2:nob]+x[1:(nob-1)])^2)
+D_hat<-0.5*log2(sum1/sum2)
+D_hat[is.nan(D_hat)]<-0
+d_B<-(B^(2-q*D_hat)*(log(log(log(B))))^0.1)^0.5
+var<-(B*d_B^2)^(-0.5) * sum( (sort(as.numeric(bootstrap_new_treatment_14))-mean(sort(as.numeric(bootstrap_new_treatment_14))))^2 )
+
+
+new_treatment114_sd<-var[1]
+
+
+u<-as.numeric(bootstrap_new_treatment_14/(var^0.5))
+u[is.nan(u)]<-0
+R<-list(u)
+
+
+
+R_sort<-list(sort(R[[1]]))
+
+
+k1<-round(B*(0.05/2))
+Quantile_upper<-R_sort[[1]][k1]
+
+
+k2<-round(B*(0.95/2))
+Quantile_lower<-R_sort[[1]][k2]
+
+
+upper14<-new_treatment_14-Quantile_upper*(var^0.5)
+lower14<-new_treatment_14+Quantile_lower*(var^0.5)
+
+
+upper14
+lower14
+
+
+ee<-c()
+for (p in 1:200){
+ee[p]<-p/10
+}
+
+e_hat<-c()
+for (r in 1:1){
+
+ff<-function (x){
+ exp(-(x-1)^2/(2*var[r]))
+}
+
+out<-c()
+for (p in 1:200){
+t<-1
+out[p]<-0.5*(2/3.1415926)^0.5*integrate( ff , lower=(1+ee[p])*t^(-0.5),upper=Inf)$value
+}
+
+e_hat[r]<-ee[which(out<=0.05)[1]]
+
+}
+
+e_hat14<-e_hat
+
+
+
+
+
+#15#
+bootstrap_new_treatment_15<-c()
+for (j in 1:100){
+
+T0<-sum(D==0)
+T1<-sum(D==0)+1
+
+t0<-sample((T0-15):(T0-10),1)
+
+t1<-sort(sample(300:800,500))
+t2<-t1^2
+
+i=15
+DD<-D[t0:(T0+i)]-c(rep(0,(T0-t0+1)),1,1,1,1,1,1,1,1,1,1,1,1,1,1,rep(0,1))
+yy<-y[t0:(T0+i)]-c(rep(0,(T0-t0+1)),new_treatment_1,new_treatment_2,new_treatment_3,new_treatment_4,new_treatment_5,new_treatment_6,new_treatment_7,new_treatment_8,new_treatment_9,new_treatment_10,new_treatment_11,new_treatment_12,new_treatment_13,new_treatment_14,rep(0,1))
+tt1<-t1[t0:(T0+i)]
+tt2<-t2[t0:(T0+i)]
+zz<-z[t0:(T0+i)]
+
+
+a_x<-2*(lm(DD~tt2+tt1)$coefficients[2])               
+a_y<-2*(lm(yy~tt2+tt1)$coefficients[2])             # 10.25* sum( (2*tt1*a_y+b_y)*w[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )  + 0.1* sum( (2*tt1*a_y+b_y)*z[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   ) 
+                                                                            
+b_x<-lm(DD~tt2+tt1)$coefficients[3]                # sum( (2*tt1*a_y+b_y)*x[1:70] )/sum( (2*tt1*a_y+b_y)^2 ) * (  mean((2*tt1*a_y+b_y)[36:70])-mean((2*tt1*a_y+b_y)[1:35])   )
+b_y<-lm(yy~tt2+tt1)$coefficients[3]
+
+A_x<-a_x
+B_x<-(-a_x)                                                        
+A_y<-a_y
+B_y<-(-a_y)
+
+x_t<-2*(a_x)*tt1+b_x
+Y_t<-(a_y*x_t+a_x*b_y-a_y*b_x)/a_x
+new<-mean(predict(lm(yy~Y_t))[(T0-t0+2):(T0+i-t0+1)])-mean(predict(lm(yy~Y_t))[1:(T0-t0+1)])                              #new_gammabeta#
+ols<-(lm(yy~DD+zz-1))$coefficients[1]
+#library(robcp)
+#structure<-teststat(y)                                  
+
+a1<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(DD[1:(T0+i-t0+1)]*Y_t)-sum(DD[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a2<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(w[1:(T0+i-t0+1)]*Y_t)-sum(w[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a3<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(z[1:(T0+i-t0+1)]*Y_t)-sum(z[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+a4<-  (mean(Y_t[(T0-t0+2):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0+1)]))* (( (T0+i-t0+1)*sum(e[1:(T0+i-t0+1)]*Y_t)-sum(e[1:(T0+i-t0+1)])*sum(Y_t) )/( (T0+i-t0+1)*sum(Y_t*Y_t)-sum(Y_t)*sum(Y_t) ))
+
+
+bootstrap_new_treatment_15[j]<-as.numeric( (new-coefficients(lm(yy~Y_t+z[t0:(T0+i)]+DD))[2]*(mean(Y_t[(T0-t0+1):(T0+i-t0+1)])-mean(Y_t[1:(T0-t0)]))-a3*coefficients(lm(yy~Y_t+z[t0:(T0+i)]+DD))[3])/a1 )
+
+}
+
+
+B<-length(bootstrap_new_treatment_15)
+q=1
+x=sort(as.numeric(bootstrap_new_treatment_15))
+nob=length(x)-1 
+sum1 = sum((x[5:(nob+1)]-2*x[3:(nob-1)]+x[1:(nob-3)])^2)
+sum2 = sum((x[3:(nob+1)]-2*x[2:nob]+x[1:(nob-1)])^2)
+D_hat<-0.5*log2(sum1/sum2)
+D_hat[is.nan(D_hat)]<-0
+d_B<-(B^(2-q*D_hat)*(log(log(log(B))))^0.1)^0.5
+var<-(B*d_B^2)^(-0.5) * sum( (sort(as.numeric(bootstrap_new_treatment_15))-mean(sort(as.numeric(bootstrap_new_treatment_15))))^2 )
+
+
+new_treatment115_sd<-var[1]
+
+
+u<-as.numeric(bootstrap_new_treatment_15/(var^0.5))
+u[is.nan(u)]<-0
+R<-list(u)
+
+
+
+R_sort<-list(sort(R[[1]]))
+
+
+k1<-round(B*(0.05/2))
+Quantile_upper<-R_sort[[1]][k1]
+
+
+k2<-round(B*(0.95/2))
+Quantile_lower<-R_sort[[1]][k2]
+
+
+
+upper15<-new_treatment_15-Quantile_upper*(var^0.5)
+lower15<-new_treatment_15+Quantile_lower*(var^0.5)
+
+
+upper15
+lower15
+
+
+ee<-c()
+for (p in 1:200){
+ee[p]<-p/10
+}
+
+e_hat<-c()
+for (r in 1:1){
+
+ff<-function (x){
+ exp(-(x-1)^2/(2*var[r]))
+}
+
+out<-c()
+for (p in 1:200){
+t<-1
+out[p]<-0.5*(2/3.1415926)^0.5*integrate( ff , lower=(1+ee[p])*t^(-0.5),upper=Inf)$value
+}
+
+e_hat[r]<-ee[which(out<=0.05)[1]]
+
+}
+
+e_hat15<-e_hat
+
+
+
+
+
+ee_hat<-list(e_hat1+1,e_hat2+1,e_hat3+1,e_hat4+1,e_hat5+1,e_hat6+1,e_hat7+1,e_hat8+1,e_hat9+1,e_hat10+1,e_hat11+1,e_hat12+1,e_hat13+1,e_hat14+1,e_hat15+1)
+ee_hat<-data.frame(ee_hat)
+
+
+
+lower_total<-list(upper1,upper2,upper3,upper4,upper5,upper6,upper7,upper8,upper9,upper10,upper11,upper12,upper13,upper14,upper15)
+upper_total<-list(lower1,lower2,lower3,lower4,lower5,lower6,lower7,lower8,lower9,lower10,lower11,lower12,lower13,lower14,lower15)
+upper_total<-data.frame(upper_total)
+lower_total<-data.frame(lower_total)
+
+
+tr<-rbind(tr)
+D<-rbind(D)
+
+cr_new_1<-as.numeric(ifelse(  (lower_total[1,]-ee_hat[1,])<=(tr[1,]*D[1,])[(min(T0)+1):(min(T0)+15)]&(tr[1,]*D[1,])[(min(T0)+1):(min(T0)+15)]<= (upper_total[1,]+ee_hat[1,]) ,1,0  ))
+
+cr_new<-c(cr_new_1)
+
+
+cr_new_mean1<-mean(c( sum(cr_new_1[1]==1)/length(cr_new_1[1]) ))
+cr_new_mean2<-mean(c( sum(cr_new_1[1:2]==1)/length(cr_new_1[1:2]) ))
+cr_new_mean3<-mean(c( sum(cr_new_1[1:3]==1)/length(cr_new_1[1:3]) ))
+cr_new_mean4<-mean(c( sum(cr_new_1[1:4]==1)/length(cr_new_1[1:4]) ))
+cr_new_mean5<-mean(c( sum(cr_new_1[1:5]==1)/length(cr_new_1[1:5]) ))
+cr_new_mean6<-mean(c( sum(cr_new_1[1:6]==1)/length(cr_new_1[1:6]) ))
+cr_new_mean7<-mean(c( sum(cr_new_1[1:7]==1)/length(cr_new_1[1:7]) ))
+cr_new_mean8<-mean(c( sum(cr_new_1[1:8]==1)/length(cr_new_1[1:8]) ))
+cr_new_mean9<-mean(c( sum(cr_new_1[1:9]==1)/length(cr_new_1[1:9]) ))
+cr_new_mean10<-mean(c( sum(cr_new_1[1:10]==1)/length(cr_new_1[1:10]) ))
+cr_new_mean11<-mean(c( sum(cr_new_1[1:11]==1)/length(cr_new_1[1:11]) ))
+cr_new_mean12<-mean(c( sum(cr_new_1[1:12]==1)/length(cr_new_1[1:12]) ))
+cr_new_mean13<-mean(c( sum(cr_new_1[1:13]==1)/length(cr_new_1[1:13]) ))
+cr_new_mean14<-mean(c( sum(cr_new_1[1:14]==1)/length(cr_new_1[1:14]) ))
+cr_new_mean15<-mean(c( sum(cr_new_1[1:15]==1)/length(cr_new_1[1:15]) ))
+
+
+cr_new_mean<-c(cr_new_mean1,cr_new_mean2,cr_new_mean3,cr_new_mean4,cr_new_mean5,cr_new_mean6,cr_new_mean7,cr_new_mean8,cr_new_mean9,cr_new_mean10,cr_new_mean11,cr_new_mean12,cr_new_mean13,cr_new_mean14,cr_new_mean15)
+
+plot(cr_new_mean,pch="")
+lines(cr_new_mean,lwd=5,col="red")
+abline(v=6,lty=3)
+
+
+cr_new_CI<-cr_new
+
+
+
+
+
+
+
+#sharp bound#
+
+total<-list(new_treatment_1,new_treatment_2,new_treatment_3,new_treatment_4,new_treatment_5,new_treatment_6,new_treatment_7,new_treatment_8,new_treatment_9,new_treatment_10,new_treatment_11,new_treatment_12,new_treatment_13,new_treatment_14,new_treatment_15)
+total<-data.frame(total)
+
+
+cr_new_1<-as.numeric(ifelse(  (total[1,]-ee_hat[1,])<=(tr[1,]*D[1,])[(min(T0)+1):(min(T0)+15)]&(tr[1,]*D[1,])[(min(T0)+1):(min(T0)+15)]<= (total[1,]+ee_hat[1,]) ,1,0  ))
+
+
+cr_new<-c(cr_new_1)
+
+
+
+
+cr_new_mean1<-mean(c( sum(cr_new_1[1]==1)/length(cr_new_1[1]) ))
+cr_new_mean2<-mean(c( sum(cr_new_1[1:2]==1)/length(cr_new_1[1:2]) ))
+cr_new_mean3<-mean(c( sum(cr_new_1[1:3]==1)/length(cr_new_1[1:3]) ))
+cr_new_mean4<-mean(c( sum(cr_new_1[1:4]==1)/length(cr_new_1[1:4]) ))
+cr_new_mean5<-mean(c( sum(cr_new_1[1:5]==1)/length(cr_new_1[1:5]) ))
+cr_new_mean6<-mean(c( sum(cr_new_1[1:6]==1)/length(cr_new_1[1:6]) ))
+cr_new_mean7<-mean(c( sum(cr_new_1[1:7]==1)/length(cr_new_1[1:7]) ))
+cr_new_mean8<-mean(c( sum(cr_new_1[1:8]==1)/length(cr_new_1[1:8]) ))
+cr_new_mean9<-mean(c( sum(cr_new_1[1:9]==1)/length(cr_new_1[1:9]) ))
+cr_new_mean10<-mean(c( sum(cr_new_1[1:10]==1)/length(cr_new_1[1:10]) ))
+cr_new_mean11<-mean(c( sum(cr_new_1[1:11]==1)/length(cr_new_1[1:11]) ))
+cr_new_mean12<-mean(c( sum(cr_new_1[1:12]==1)/length(cr_new_1[1:12]) ))
+cr_new_mean13<-mean(c( sum(cr_new_1[1:13]==1)/length(cr_new_1[1:13]) ))
+cr_new_mean14<-mean(c( sum(cr_new_1[1:14]==1)/length(cr_new_1[1:14]) ))
+cr_new_mean15<-mean(c( sum(cr_new_1[1:15]==1)/length(cr_new_1[1:15]) ))
+
+
+cr_new_mean<-c(cr_new_mean1,cr_new_mean2,cr_new_mean3,cr_new_mean4,cr_new_mean5,cr_new_mean6,cr_new_mean7,cr_new_mean8,cr_new_mean9,cr_new_mean10,cr_new_mean11,cr_new_mean12,cr_new_mean13,cr_new_mean14,cr_new_mean15)
+
+plot(cr_new_mean,pch="")
+lines(cr_new_mean,lwd=5,col="red")
+abline(v=6,lty=3)
+
+
+
+cr_new_SB<-cr_new
+
+
+
+
+
+
+new_treatment_sd<-c(new_treatment11_sd,new_treatment12_sd,new_treatment13_sd,new_treatment14_sd,new_treatment15_sd,new_treatment16_sd,new_treatment17_sd,new_treatment18_sd,new_treatment19_sd,new_treatment110_sd,new_treatment111_sd,new_treatment112_sd,new_treatment113_sd,new_treatment114_sd,new_treatment115_sd)
+
+new_treatment_var<-new_treatment_sd^2
+
+B<-length(new_treatment_var)
+q=1
+x=sort(as.numeric(new_treatment_var))
+nob=length(x)-1 
+sum1 = sum((x[5:(nob+1)]-2*x[3:(nob-1)]+x[1:(nob-3)])^2)
+sum2 = sum((x[3:(nob+1)]-2*x[2:nob]+x[1:(nob-1)])^2)
+D_hat<-0.5*log2(sum1/sum2)
+D_hat[is.nan(D_hat)]<-0
+d_B<-(B^(2-q*D_hat)*((log(log(B))))^0.1)^0.5
+var<-(B*d_B^2)^(-0.5) * sum( (sort(as.numeric(new_treatment_var))-mean(sort(as.numeric(new_treatment_var))))^2 )
+
+
+
+mean_effect<-(new_treatment_1+new_treatment_2+new_treatment_3+new_treatment_4+new_treatment_5+new_treatment_6+new_treatment_7+new_treatment_8+new_treatment_9+new_treatment_10+new_treatment_11+new_treatment_12+new_treatment_13+new_treatment_14+new_treatment_15)/15
+
+
+
+mean(tr[T1:500][1:15])
+
+
+Z<-mean_effect/var^0.5
+
+Z<-mean_effect/((1/(15*15))*sum(new_treatment_var))^0.5
+
+accept<-ifelse(Z>=3,1,0)
+
+
+out1<-c(accept)
+
+return(out1)
+
+}
+
+
+out1<-c()
+for (i in 1:100){
+  out1[[i]] <- w()
+}
+
+
+
+
+TT<-100
+ 
+accept<-list()
+for(i in 1:TT){
+accept[[i]]<-out1[[i]][[1]]
+}
+
+summary(unlist(accept))
+
+
+
+
+1-0.81=0.19
+
+
+
+
+
+power<-c()
+
