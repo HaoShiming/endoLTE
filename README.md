@@ -39,14 +39,13 @@ custom_data <- generate_endoLTE_data(
 )
 
 # Estimate with parallel processing
-result2 <- estimate_panel_lte(
+result <- estimate_panel_lte(
   data = custom_data,
   unit_id = "unit_id",
-  time_var = "time",
+  time_var = "time",     #Using time as common proximal variable
   outcome = "y",
   treatment = "D",
   covariates = "z",
-  confounders = "w",
   n_post_periods = 10,
   bootstrap_iter = 200,
   parallel = TRUE,
@@ -55,39 +54,39 @@ result2 <- estimate_panel_lte(
 )
 
 # Extract specific results
-unit_avg_ate <- result2$pooled_results$unit_average$estimate
-comp_ate <- result2$pooled_results$comprehensive$estimate
+unit_avg_ate <- result$pooled_results$unit_average$estimate
+comp_ate <- result$pooled_results$comprehensive$estimate
 
 cat(sprintf("Unit-average ATE: %.3f\n", unit_avg_ate))
 cat(sprintf("Comprehensive ATE: %.3f\n", comp_ate))
 
 # Performance metrics
-if (!is.null(result2$performance)) {
-  cat(sprintf("Coverage: %.3f\n", result2$performance$coverage))
-  cat(sprintf("RMSE: %.3f\n", result2$performance$rmse))
-  cat(sprintf("Correlation: %.3f\n", result2$performance$correlation))
+if (!is.null(result$performance)) {
+  cat(sprintf("Coverage: %.3f\n", result$performance$coverage))
+  cat(sprintf("RMSE: %.3f\n", result$performance$rmse))
+  cat(sprintf("Correlation: %.3f\n", result$performance$correlation))
 }
 
 # Example 2: Using your own data
 # -------------------------------
 # my_data <- read.csv("your_data.csv")
 # 
-# result3 <- estimate_panel_lte(
+# result <- estimate_panel_lte(
 #   data = my_data,
 #   unit_id = "id",
-#   time_var = "period",
+#   time_var = "period",    #User defined common proximal variable
 #   outcome = "outcome",
 #   treatment = "treatment",
 #   covariates = c("x1", "x2"),
-#   confounders = "c1",
 #   n_post_periods = 5,
 #   bootstrap_iter = 1000
 # )
 
 # Save results
-saveRDS(result1, file = "endoLTE_results.rds")
+saveRDS(result, file = "endoLTE_results.rds")
 
 # Load results
 loaded_results <- readRDS("endoLTE_results.rds")
 summary(loaded_results)
+plot_endoLTE(loaded_results)
 ```
