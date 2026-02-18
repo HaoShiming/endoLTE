@@ -90,3 +90,4 @@ loaded_results <- readRDS("endoLTE_results.rds")
 summary(loaded_results)
 plot_endoLTE(loaded_results)
 ```
+(Please contact me if you have any questions concerning the methodologies or codes of Rbinetwork: haoshiming@ynu.edu.cn)
